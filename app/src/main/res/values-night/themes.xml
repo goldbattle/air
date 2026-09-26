@@ -1,0 +1,1 @@
+<resources><style name="Theme.air" parent="android:Theme.Material.NoActionBar"><item name="android:windowBackground">#FF000000</item></style></resources>

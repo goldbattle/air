@@ -1,0 +1,330 @@
+package com.aria.air
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
+
+/**
+ * The only network traffic in the app. It sends flight numbers, never who you are or what's in your documents:
+ *  - adsb.lol (free, open data): the route for a flight number, and the plane's live position/speed/altitude.
+ *  - AeroDataBox via RapidAPI or FlightAware AeroAPI (optional, your own key): schedule, delays, gates, baggage belt,
+ *    aircraft. AeroDataBox is used when both keys are set.
+ */
+object Api {
+    class HttpError(val code: Int, msg: String) : Exception(msg)
+
+    private fun get(url: String, headers: Map<String, String> = emptyMap()): String {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 10_000
+            c.readTimeout = 15_000
+            c.setRequestProperty("User-Agent", "Air-Android/${BuildConfig.VERSION_NAME}")
+            headers.forEach(c::setRequestProperty)
+            val code = c.responseCode
+            if (code !in 200..299) throw HttpError(code, "HTTP $code from ${URL(url).host}")
+            return c.inputStream.bufferedReader().readText()
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /** ICAO callsign as broadcast by the plane: UA2000 -> UAL2000. */
+    fun callsign(airline: String, number: String) = (Db.airline(airline)?.icao ?: airline) + number.trimStart('0')
+
+    /** Airports the flight number serves, in order ("PIT", "SFO"), or empty when unknown. Multi-stop flights give 3+. */
+    suspend fun route(airline: String, number: String): List<String> = withContext(Dispatchers.IO) {
+        val cs = callsign(airline, number)
+        runCatching {
+            JSONObject(get("https://vrs-standing-data.adsb.lol/routes/${cs.take(2)}/$cs.json"))
+                .optString("_airport_codes_iata").split("-").filter { it.length == 3 }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Latest ADS-B fix for the flight's callsign, if the plane is broadcasting and plausibly on this route. */
+    suspend fun live(f: Flight): Live? = withContext(Dispatchers.IO) {
+        val body = runCatching { get("https://api.adsb.lol/v2/callsign/${callsign(f.airline, f.number)}") }.getOrNull()
+            ?: return@withContext null
+        val ac = JSONObject(body).optJSONArray("ac") ?: return@withContext null
+        val now = Instant.now()
+        (0 until ac.length()).map { ac.getJSONObject(it) }.filter { it.has("lat") }.map { a ->
+            val alt = a.opt("alt_baro")
+            Live(
+                lat = a.getDouble("lat"), lon = a.getDouble("lon"),
+                altFt = (alt as? Number)?.toInt() ?: 0, speedKt = a.optDouble("gs", 0.0).toInt(),
+                track = a.optDouble("track", 0.0), vrateFpm = a.optInt("baro_rate"),
+                at = now.minusMillis((a.optDouble("seen_pos", 0.0) * 1000).toLong()),
+                onGround = alt == "ground", aircraft = a.optString("t"), reg = a.optString("r"),
+            )
+        }.firstOrNull { onRoute(f, it) }
+    }
+
+    /** Flight numbers get reused on other legs, so only trust a plane that's roughly between the two airports. */
+    fun onRoute(f: Flight, l: Live): Boolean {
+        val o = f.origin ?: return true
+        val d = f.dest ?: return true
+        val total = distKm(o, d)
+        return distKm(o.lat, o.lon, l.lat, l.lon) + distKm(l.lat, l.lon, d.lat, d.lon) < total * 1.25 + 150
+    }
+
+    /** Status from FlightAware AeroAPI. Only covers roughly 10 days back to 2 days ahead. */
+    suspend fun aero(f: Flight, key: String): Flight? = withContext(Dispatchers.IO) {
+        val start = f.date.minusDays(1).atStartOfDay().toInstant(java.time.ZoneOffset.UTC)
+        val end = f.date.plusDays(2).atStartOfDay().toInstant(java.time.ZoneOffset.UTC)
+        val body = get(
+            "https://aeroapi.flightaware.com/aeroapi/flights/${callsign(f.airline, f.number)}?start=$start&end=$end",
+            mapOf("x-apikey" to key),
+        )
+        val arr = JSONObject(body).optJSONArray("flights") ?: return@withContext null
+        val legs = (0 until arr.length()).map { arr.getJSONObject(it) }
+        fun iata(j: JSONObject, k: String) = j.optJSONObject(k)?.optString("code_iata").orEmpty()
+        fun t(j: JSONObject, vararg keys: String) = keys.firstNotNullOfOrNull { k ->
+            j.optString(k).takeIf { it.isNotEmpty() && it != "null" }?.let { runCatching { Instant.parse(it) }.getOrNull() }
+        }
+        // Same origin, departing on the flight's local date.
+        val leg = legs.firstOrNull { j ->
+            val out = t(j, "scheduled_out", "scheduled_off") ?: return@firstOrNull false
+            (f.from.isEmpty() || iata(j, "origin") == f.from) && out.atZone(f.fromTz).toLocalDate() == f.date
+        } ?: return@withContext null
+        fun s(k: String) = leg.optString(k).takeIf { it != "null" }.orEmpty()
+        f.copy(
+            from = iata(leg, "origin").ifEmpty { f.from }, to = iata(leg, "destination").ifEmpty { f.to },
+            depSched = t(leg, "scheduled_out", "scheduled_off") ?: f.depSched,
+            depEst = t(leg, "estimated_out", "estimated_off"), depActual = t(leg, "actual_out", "actual_off"),
+            arrSched = t(leg, "scheduled_in", "scheduled_on") ?: f.arrSched,
+            arrEst = t(leg, "estimated_in", "estimated_on"), arrActual = t(leg, "actual_in", "actual_on"),
+            depTerminal = s("terminal_origin"), depGate = s("gate_origin"),
+            arrTerminal = s("terminal_destination"), arrGate = s("gate_destination"), baggage = s("baggage_claim"),
+            aircraft = s("aircraft_type").ifEmpty { f.aircraft }, reg = s("registration").ifEmpty { f.reg },
+            cancelled = leg.optBoolean("cancelled"), diverted = leg.optBoolean("diverted"),
+        )
+    }
+
+    private val adbTime = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mmX")
+    private fun adbHeaders(key: String) = mapOf("X-RapidAPI-Key" to key, "X-RapidAPI-Host" to "aerodatabox.p.rapidapi.com")
+
+    /** Status from AeroDataBox (RapidAPI). Covers roughly a year back and a year ahead. */
+    suspend fun adb(f: Flight, key: String): Flight? = withContext(Dispatchers.IO) {
+        val body = get(
+            "https://aerodatabox.p.rapidapi.com/flights/number/${f.airline}${f.number}/${f.date}" +
+                "?withAircraftImage=false&withLocation=false&dateLocalRole=Departure",
+            adbHeaders(key),
+        )
+        if (body.isBlank()) return@withContext null // 204: no such flight that day
+        val legs = org.json.JSONArray(body).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+        fun iata(side: JSONObject?) = side?.optJSONObject("airport")?.optString("iata").orEmpty()
+        // Only this flight's day: another day's run of the same number says nothing about this one.
+        fun localDate(side: JSONObject?) = side?.optJSONObject("scheduledTime")?.optString("local")?.take(10)
+        val leg = legs.filter { localDate(it.optJSONObject("departure")) == f.date.toString() }
+            .let { day -> day.firstOrNull { iata(it.optJSONObject("departure")) == f.from } ?: day.firstOrNull() }
+            ?: return@withContext null
+        val dep = leg.optJSONObject("departure") ?: JSONObject()
+        val arr = leg.optJSONObject("arrival") ?: JSONObject()
+        fun t(side: JSONObject, k: String) = side.optJSONObject(k)?.optString("utc")?.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { java.time.OffsetDateTime.parse(it, adbTime).toInstant() }.getOrNull() }
+        fun s(side: JSONObject, k: String) = side.optString(k).takeIf { it != "null" }.orEmpty()
+        val status = leg.optString("status")
+        val departed = status in setOf("Departed", "EnRoute", "Approaching", "Arrived", "Diverted")
+        val arrived = status == "Arrived"
+        val arrEst = t(arr, "revisedTime") ?: t(arr, "predictedTime")
+        val aircraft = leg.optJSONObject("aircraft")
+        f.copy(
+            from = iata(dep).ifEmpty { f.from }, to = iata(arr).ifEmpty { f.to },
+            depSched = t(dep, "scheduledTime") ?: f.depSched, depEst = t(dep, "revisedTime"),
+            depActual = if (departed) t(dep, "runwayTime") ?: t(dep, "revisedTime") ?: f.depActual else null,
+            arrSched = t(arr, "scheduledTime") ?: f.arrSched, arrEst = arrEst,
+            arrActual = if (arrived) t(arr, "revisedTime") ?: t(arr, "runwayTime") ?: arrEst ?: f.arrSched else null,
+            depTerminal = s(dep, "terminal"), depGate = s(dep, "gate"),
+            arrTerminal = s(arr, "terminal"), arrGate = s(arr, "gate"), baggage = s(arr, "baggageBelt"),
+            aircraft = aircraft?.optString("model")?.takeIf { it.isNotEmpty() } ?: f.aircraft,
+            reg = aircraft?.optString("reg")?.takeIf { it.isNotEmpty() } ?: f.reg,
+            cancelled = status.startsWith("Cancel"), diverted = status == "Diverted",
+        )
+    }
+
+    suspend fun testAdbKey(key: String): String? = withContext(Dispatchers.IO) {
+        try {
+            get("https://aerodatabox.p.rapidapi.com/flights/number/UA900/${LocalDate.now()}?withAircraftImage=false&withLocation=false", adbHeaders(key)); null
+        } catch (e: HttpError) {
+            when (e.code) {
+                401, 403 -> "Key rejected (${e.code}): subscribe to AeroDataBox on RapidAPI"
+                429 -> "Monthly quota used up"
+                else -> e.message
+            }
+        } catch (e: Exception) {
+            e.message ?: "No connection"
+        }
+    }
+
+    /**
+     * Weather at [a] at the hour of [at], from Open-Meteo (free, no key): the forecast API up to ~16 days ahead and
+     * for the last two months, the ERA5 archive before that. Sends only the airport's coordinates and the date.
+     */
+    suspend fun weather(a: Airport, at: Instant): Wx? = withContext(Dispatchers.IO) {
+        val utc = at.atZone(java.time.ZoneOffset.UTC)
+        val day = utc.toLocalDate()
+        val today = LocalDate.now(java.time.ZoneOffset.UTC)
+        val host = when {
+            day < today.minusDays(60) -> "https://archive-api.open-meteo.com/v1/archive"
+            day <= today.plusDays(15) -> "https://api.open-meteo.com/v1/forecast"
+            else -> return@withContext null // too far out to forecast yet
+        }
+        val h = runCatching {
+            JSONObject(get("$host?latitude=${a.lat}&longitude=${a.lon}&hourly=temperature_2m,weather_code,wind_speed_10m&start_date=$day&end_date=$day&timezone=GMT"))
+                .getJSONObject("hourly")
+        }.getOrNull() ?: return@withContext null
+        val i = utc.hour
+        val t = h.optJSONArray("temperature_2m")?.opt(i) as? Number ?: return@withContext null
+        Wx(
+            tempC = t.toDouble(), code = (h.optJSONArray("weather_code")?.opt(i) as? Number)?.toInt() ?: -1,
+            windKmh = (h.optJSONArray("wind_speed_10m")?.opt(i) as? Number)?.toDouble() ?: 0.0, at = at, fetched = Instant.now(),
+        )
+    }
+
+    /** Fills in takeoff/landing weather: once for past flights, every 3 h for upcoming ones until they happen. */
+    suspend fun refreshWeather(f: Flight): Flight {
+        val o = f.origin ?: return f
+        val d = f.dest ?: return f
+        val now = Instant.now()
+        // Forecasts sharpen as the day nears: daily when days away, every 6 h in the last 3 days, every 3 h on the day.
+        fun every(at: Instant) = Duration.between(now, at).let {
+            when {
+                it < Duration.ofHours(12) -> Duration.ofHours(3)
+                it < Duration.ofDays(3) -> Duration.ofHours(6)
+                else -> Duration.ofHours(24)
+            }
+        }
+        fun stale(w: Wx?, happened: Boolean) = w == null || (!happened && Duration.between(w.fetched, now) > every(w.at))
+        var n = f
+        val dep = f.dep ?: f.depGuess
+        val arr = f.arr ?: f.arrGuess
+        if (stale(f.depWx, dep < now.minus(Duration.ofHours(1)))) weather(o, dep)?.let { n = n.copy(depWx = it) }
+        if (stale(f.arrWx, arr < now.minus(Duration.ofHours(1)))) weather(d, arr)?.let { n = n.copy(arrWx = it) }
+        return n
+    }
+
+    /** One pass over every flight still missing weather (e.g. an imported history). */
+    suspend fun backfillWeather() {
+        for (f in Store.flights.filter { it.depWx == null || it.arrWx == null }.toList()) {
+            val n = runCatching { refreshWeather(f) }.getOrDefault(f)
+            if (n != f) Store.get(f.id)?.let { cur -> Store.upsert(cur.copy(depWx = n.depWx ?: cur.depWx, arrWx = n.arrWx ?: cur.arrWx)) }
+            kotlinx.coroutines.delay(250) // be polite to the free API
+        }
+    }
+
+    /**
+     * How often the keyed status service (AeroDataBox / FlightAware, which cost quota) may be asked about a flight,
+     * or null for never automatically. Sparse far out, where only cancellations and retimings can show up, and
+     * frequent only around the gate and landing. Live position and weather come from free services and aren't
+     * limited by this.
+     */
+    fun statusEvery(f: Flight, now: Instant): Duration? {
+        if (f.arrActual != null || f.cancelled) return null // settled
+        val toDep = Duration.between(now, f.dep ?: f.depGuess)
+        val toArr = Duration.between(now, f.arr ?: f.arrGuess)
+        return when {
+            toArr < Duration.ofHours(-2) -> null                                   // long over: nothing more to learn
+            toDep.isNegative -> if (toArr < Duration.ofMinutes(45)) Duration.ofMinutes(20) else Duration.ofMinutes(45)
+            toDep < Duration.ofHours(4) -> Duration.ofMinutes(20)                  // gate, delays, boarding
+            toDep < Duration.ofHours(24) -> Duration.ofHours(2)
+            toDep < Duration.ofDays(3) -> Duration.ofHours(12)
+            toDep < Duration.ofDays(14) -> Duration.ofDays(1)
+            else -> Duration.ofDays(7)                                             // just watching for cancellations
+        }
+    }
+
+    private val lastLiveTry = java.util.concurrent.ConcurrentHashMap<String, Instant>()
+
+    /**
+     * How often to ask adsb.lol where the plane is (free, but still battery and data), or null when there's nothing
+     * to see. At the gate it's only to catch takeoff; near landing more often; every minute only while you're
+     * looking at the flight.
+     */
+    fun liveEvery(f: Flight, now: Instant, foreground: Boolean): Duration? {
+        val phase = f.phase(now)
+        if (!(phase in Phase.Departure..Phase.Arrival || f.maybeLive) || f.arrActual != null) return null
+        if (foreground) return Duration.ofMinutes(1)
+        val toArr = Duration.between(now, f.arr ?: f.arrGuess)
+        return when {
+            phase == Phase.InFlight && toArr < Duration.ofMinutes(45) -> Duration.ofMinutes(3)
+            else -> Duration.ofMinutes(10)
+        }
+    }
+
+    /** Lookups this calendar month, shown in Settings › Data so quota use is visible. */
+    private fun countLookup() {
+        val k = "lookups-" + java.time.YearMonth.now()
+        Prefs[k] = ((Prefs[k].toIntOrNull() ?: 0) + 1).toString()
+    }
+
+    fun lookupsThisMonth() = Prefs["lookups-" + java.time.YearMonth.now()].toIntOrNull() ?: 0
+
+    /** Checks an AeroAPI key with a cheap call. Returns null when it works, else the problem. */
+    suspend fun testKey(key: String): String? = withContext(Dispatchers.IO) {
+        try {
+            get("https://aeroapi.flightaware.com/aeroapi/airports/KSFO", mapOf("x-apikey" to key)); null
+        } catch (e: HttpError) {
+            if (e.code == 401 || e.code == 403) "Key rejected (${e.code})" else e.message
+        } catch (e: Exception) {
+            e.message ?: "No connection"
+        }
+    }
+
+    /**
+     * Refreshes everything we can about a flight. [auto] = background poll, which spends status API calls sparingly:
+     * every 15 min around the flight, every 6 h before it.
+     */
+    suspend fun refresh(f: Flight, auto: Boolean = false, foreground: Boolean = false): Flight {
+        var n = f
+        val now = Instant.now()
+        val adbKey = Prefs.adbKey
+        val aeroKey = Prefs.aeroKey
+        // Automatic lookups follow statusEvery(); only the refresh button (auto = false) goes around it.
+        val every = statusEvery(f, now)
+        val due = every != null && (f.updated == null || Duration.between(f.updated, now) > every)
+        val today = LocalDate.now()
+        if (!auto || due) {
+            val status = when {
+                adbKey.isNotBlank() && f.date in today.minusDays(360)..today.plusDays(360) -> runCatching { adb(n, adbKey) }.getOrNull()
+                aeroKey.isNotBlank() && f.date in today.minusDays(9)..today.plusDays(2) -> runCatching { aero(n, aeroKey) }.getOrNull()
+                else -> null
+            }
+            if (adbKey.isNotBlank() || aeroKey.isNotBlank()) countLookup()
+            status?.let { n = it.copy(updated = now) }
+        }
+        // Without a status provider, takeoff and landing are inferred from ADS-B below.
+        val key = adbKey + aeroKey
+        val liveEvery = liveEvery(n, now, foreground)
+        val liveDue = liveEvery != null && (!auto || lastLiveTry[n.id]?.let { Duration.between(it, now) >= liveEvery } != false)
+        if (liveDue && n.arrActual == null) {
+            lastLiveTry[n.id] = now
+            val l = live(n)
+            if (l != null) {
+                n = n.copy(live = l, aircraft = n.aircraft.ifEmpty { l.aircraft }, reg = n.reg.ifEmpty { l.reg })
+                // Without a status API, estimate takeoff and landing from where the plane is and how fast it's going.
+                // ponytail: straight line at current ground speed, so a few minutes off with wind and approach paths.
+                val o = n.origin; val d = n.dest
+                val kmh = l.speedKt * 1.852
+                if (!l.onGround && key.isBlank() && o != null && d != null && kmh > 200) {
+                    val flown = distKm(o.lat, o.lon, l.lat, l.lon)
+                    val left = distKm(l.lat, l.lon, d.lat, d.lon)
+                    if (n.depActual == null) n = n.copy(depActual = l.at.minusSeconds((flown / kmh * 3600).toLong() + 600))
+                    n = n.copy(arrEst = l.at.plusSeconds((left / kmh * 3600).toLong() + 900))
+                }
+            } else if (key.isBlank() && n.live != null && !n.live!!.onGround && n.arrActual == null) {
+                // Stopped broadcasting: landed if the last fix was low and near the destination.
+                val d = n.dest
+                val nearDest = d != null && distKm(n.live!!.lat, n.live!!.lon, d.lat, d.lon) < 60 && n.live!!.altFt < 6000
+                if (nearDest) n = n.copy(arrActual = n.live!!.at)
+            }
+            if (l != null && l.onGround && key.isBlank() && n.depActual != null && n.dest?.let { distKm(l.lat, l.lon, it.lat, it.lon) < 10 } == true) {
+                n = n.copy(arrActual = n.arrActual ?: l.at)
+            }
+        }
+        return runCatching { refreshWeather(n) }.getOrDefault(n)
+    }
+}

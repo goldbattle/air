@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Air</string>
+    <string name="widget_description">Your next flight: countdown, boarding and progress in the air</string>
+</resources>

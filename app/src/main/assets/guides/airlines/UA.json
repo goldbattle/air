@@ -1,0 +1,7 @@
+{
+  "iata": "UA",
+  "color": "#0033A0",
+  "alliance": "Star Alliance",
+  "hubs": ["SFO", "ORD", "DEN", "IAH", "EWR", "IAD", "LAX"],
+  "links": [{ "title": "united.com", "url": "https://www.united.com" }]
+}
