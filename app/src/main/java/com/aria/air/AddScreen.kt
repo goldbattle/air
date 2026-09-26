@@ -50,6 +50,15 @@ fun importInto(ctx: Context, uri: Uri?, text: String?, friend: Boolean) {
         val raw = runCatching { if (uri != null) Importer.text(ctx, uri) else Importer.stripHtml(text!!) }
         val t = raw.getOrNull()
         // A byAir export is a whole history: add it straight away instead of reviewing flight by flight.
+        // An Air backup (shared from Files, another phone, or the screenshot script): restore it.
+        if (t != null && Store.isBackup(t)) {
+            val added = Store.import(t)
+            TrackWorker.schedule(ctx)
+            Imports.clear()
+            Nav.pop()
+            Toast.makeText(ctx, "Restored $added flights from backup", Toast.LENGTH_LONG).show()
+            return@launch
+        }
         if (t != null && isByAirCsv(t)) {
             val flights = byAirFlights(t)
             val added = Store.addAll(flights)

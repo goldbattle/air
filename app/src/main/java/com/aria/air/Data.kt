@@ -336,7 +336,7 @@ object Store {
     }
 
     fun json(list: List<Flight> = flights): String =
-        JSONObject().put("app", "air").put("version", 1).put("flights", JSONArray(list.map { it.toJson() })).toString()
+        JSONObject().put("app", "air").put("version", 1).put("name", Prefs.name).put("flights", JSONArray(list.map { it.toJson() })).toString()
 
     /** Write to a temp file and rename, so a crash mid-write never loses the file. */
     private fun save() = synchronized(this) {
@@ -363,7 +363,11 @@ object Store {
     fun findSame(f: Flight) = flights.firstOrNull { it.code == f.code && it.date == f.date && it.friend.equals(f.friend, true) }
 
     /** Merges a backup: new flights are added, existing ones (same id) are left alone. Returns how many were added. */
+    fun isBackup(text: String) = text.trimStart().startsWith("{") && Regex("\"app\"\\s*:\\s*\"air\"").containsMatchIn(text.take(200))
+
     fun import(text: String): Int {
+        // A backup also carries the traveler's name; take it if none is set yet.
+        runCatching { JSONObject(text).optString("name") }.getOrNull()?.takeIf { it.isNotBlank() && Prefs.name.isBlank() }?.let { Prefs.name = it }
         val known = flights.map { it.id }.toSet()
         val add = parse(text).filter { it.id !in known && findSame(it) == null }
         flights.addAll(add)

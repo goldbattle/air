@@ -2,6 +2,26 @@
 
 Android flight tracker and travel passport (Jetpack Compose, iOS-style UI). Private by design: everything stays on the phone.
 
+<!-- screenshots:start -->
+## Screenshots
+
+Made-up example data (the two flights in the air are real flights at the time of capture). Regenerate with `python tools/screenshots.py`.
+
+| **Flights** | **In flight** | **Before a trip** |
+|---|---|---|
+| <img src="docs/screenshots/flights.png" width="260"> | <img src="docs/screenshots/flight_live.png" width="260"> | <img src="docs/screenshots/flight_pretravel.png" width="260"> |
+| Upcoming trips; a flight in the air shows live progress, speed and altitude. | Route map with the live plane and the phase bar: pre-travel, departure, in the air, arrival. | Countdown, estimated boarding, seat and confirmation, time zone change. |
+| **Schedule & weather** | **History** | **Friends** |
+| <img src="docs/screenshots/flight_details.png" width="260"> | <img src="docs/screenshots/past.png" width="260"> | <img src="docs/screenshots/friends.png" width="260"> |
+| Times, distance, and the weather at takeoff and landing (Open-Meteo). | Every past flight, imported from byAir, PDFs, screenshots or emails. | Friends' flights, tracked live like your own, with alerts when they land. |
+| **Passport** | **Passport lists** | **Import** |
+| <img src="docs/screenshots/passport.png" width="260"> | <img src="docs/screenshots/passport_lists.png" width="260"> | <img src="docs/screenshots/import.png" width="260"> |
+| Your flights on a map with miles, time in the air, airports and countries. | Top airports, airlines and routes; personal and work trips counted separately. | Confirmations read on the phone: traveler, flights, seats and confirmation codes. |
+| **Notifications** | **Widget** | **Settings** |
+| <img src="docs/screenshots/notifications.png" width="260"> | <img src="docs/screenshots/widget.png" width="260"> | <img src="docs/screenshots/settings.png" width="260"> |
+| Live countdown before departure, then flight progress, as ongoing notifications. | Home screen widget with the route map and a big countdown. | Privacy, notifications, data sources, duplicates and backup. |
+<!-- screenshots:end -->
+
 ## Tabs
 
 - **Flights**: upcoming and past flights, grouped by day. Tap **+** to search a flight number and date, or import.
