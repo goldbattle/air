@@ -47,6 +47,7 @@ class App : Application() {
         Land.load(this)
         Guides.init(this)
         Store.init(this)
+        Mail.init(this)
         Store.onChange = { scope.launch { FlightWidget.refresh(this@App) } }
         Notify.channels(this)
         TrackWorker.schedule(this)
@@ -66,6 +67,8 @@ sealed class Screen {
     data class Add(val friend: Boolean, val found: List<Found>? = null, val error: String? = null) : Screen()
     data class AirportInfo(val code: String) : Screen()
     data class AirlineInfo(val code: String) : Screen()
+    data object MailAccounts : Screen()
+    data object MailFound : Screen()
 }
 
 object Nav {
@@ -100,6 +103,7 @@ class MainActivity : ComponentActivity() {
             Nav.push(Screen.FlightDetail(id))
             return
         }
+        if (intent.getBooleanExtra("mail", false)) { Nav.open(Tab.Settings); Nav.push(Screen.MailFound); return }
         if (intent.action != Intent.ACTION_SEND) return
         val stream = intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -138,6 +142,8 @@ class MainActivity : ComponentActivity() {
                         is Screen.Add -> AddScreen(s)
                         is Screen.AirportInfo -> AirportScreen(s.code)
                         is Screen.AirlineInfo -> AirlineScreen(s.code)
+                        Screen.MailAccounts -> MailScreen()
+                        Screen.MailFound -> MailFoundScreen()
                     }
                 }
             }

@@ -265,6 +265,8 @@ private fun BackupTab() {
         Cell("Import byAir export", subtitle = "The .csv from byAir › Export flights", chevron = true) {
             byAir.launch(arrayOf("text/*", "*/*"))
         }
+        Hairline(50.dp)
+        Cell("Find flights in email", subtitle = "Scan Gmail for confirmations", icon = Icons.Filled.Email, chevron = true) { Nav.push(Screen.MailAccounts) }
     }
     Footnote(
         "Cloud backup is off, so export now and then and keep the file somewhere safe. " +

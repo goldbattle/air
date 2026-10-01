@@ -37,8 +37,11 @@ object Imports {
     var traveler by mutableStateOf<String?>(null) // name on the booking, if the document says
     var work by mutableStateOf(false)             // booked through a company
     var error by mutableStateOf<String?>(null)
+    var recipient by mutableStateOf<String?>(null) // address the email was sent to, when it came from a linked mailbox
+    /** Called when the review ends, with whether flights were added (instead of opening them); see [Mail.review]. */
+    var then: ((Boolean) -> Unit)? = null
     val active get() = busy || found != null || error != null
-    fun clear() { busy = false; found = null; traveler = null; work = false; error = null }
+    fun clear() { busy = false; found = null; traveler = null; work = false; error = null; recipient = null; then = null }
 }
 
 /** Reads flights out of a shared/picked file or text, entirely on the phone, then opens the Add screen to review. */
@@ -303,7 +306,7 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     val owner = if (mine) "" else friendName.trim()
 
-    fun cancel() { Imports.clear(); Nav.pop() }
+    fun cancel() { val then = Imports.then; Imports.clear(); Nav.pop(); then?.invoke(false) }
 
     fun addAll() {
         val list = picked.sorted().map { i -> items[i] to (i in copies) }
@@ -316,9 +319,12 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
                 val flight = f.toFlight(route, owner, work)
                 if (flight == null) skipped += f.label else ids += addFlight(ctx, flight, asCopy = copy)
             }
+            val then = Imports.then
             Imports.clear()
-            Nav.open(if (mine) Tab.Flights else Tab.Friends)
-            if (ids.size == 1) Nav.push(Screen.FlightDetail(ids[0]))
+            if (then != null) { Nav.pop(); then(ids.isNotEmpty()) } else {
+                Nav.open(if (mine) Tab.Flights else Tab.Friends)
+                if (ids.size == 1) Nav.push(Screen.FlightDetail(ids[0]))
+            }
             Toast.makeText(
                 ctx,
                 "Added ${ids.size} flight${if (ids.size == 1) "" else "s"}" +
