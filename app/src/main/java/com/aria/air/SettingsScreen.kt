@@ -298,6 +298,10 @@ private fun BackupTab() {
         Cell("Import byAir export", subtitle = "The .csv from byAir › Export flights", icon = Icons.Filled.FileOpen, chevron = true) {
             byAir.launch(arrayOf("text/*", "*/*"))
         }
+        Hairline(50.dp)
+        Cell("Print to Air", subtitle = "Turn on Air here once, then print emails to \"Save to Air\"", icon = Icons.Filled.Print, chevron = true) {
+            ctx.startActivity(Intent(Settings.ACTION_PRINT_SETTINGS))
+        }
     }
     Footnote(
         "Cloud backup is off so your history stays private. Export now and then and keep the file somewhere safe. " +

@@ -496,6 +496,9 @@ object Prefs {
     var aeroKey: String get() = this["aeroKey"]; set(v) { this["aeroKey"] = v }
     var adbKey: String get() = this["adbKey"]; set(v) { this["adbKey"] = v }
     val hasStatusKey get() = aeroKey.isNotBlank() || adbKey.isNotBlank()
+    /** Whether flights emailed to this address were work trips last time, or null if never imported. */
+    fun workFor(address: String): Boolean? = values["workTo:$address"]?.let { it == "1" }
+    fun setWorkFor(address: String, work: Boolean) = setFlag("workTo:$address", work)
     /** Hours before departure for the reminder on my flights, 0 = off. */
     var reminderHours: Int get() = this["reminderHours"].toIntOrNull() ?: 3; set(v) { this["reminderHours"] = v.toString() }
     /** Hours before my departures that the ongoing countdown notification appears. */

@@ -71,7 +71,9 @@ object Importer {
 
     /** Emails saved as .eml/.html: drop tags and quoted-printable soft breaks so the text reads normally. */
     fun stripHtml(s: String): String = s.replace("=\r\n", "").replace("=\n", "").replace("=3D", "=")
-        .replace(Regex("(?is)<(script|style).*?</\\1>"), " ").replace(Regex("<[^>]+>"), " ")
+        .replace(Regex("(?is)<(script|style).*?</\\1>"), " ")
+        .replace(Regex("<([\\w.+-]+@[\\w.-]+)>"), " $1 ") // keep the address in "To: Jane <jane@x.com>"
+        .replace(Regex("<[^>]+>"), " ")
         .replace("&nbsp;", " ").replace("&amp;", "&").replace(Regex("[ \\t]+"), " ")
 
     // ---------- Parsing ----------
@@ -160,6 +162,21 @@ object Importer {
 
     /** Booked through a company: expense/cost-center language or a corporate travel agency. */
     fun isWork(text: String) = workRe.containsMatchIn(clean(text))
+
+    private val emailRe = Regex("[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+")
+
+    /**
+     * The address an email was sent to, from its first "To:" line (the header of a .eml or a Gmail printout; later ones
+     * are quoted forwards). Of several, one you've already marked work or not ([known]), else the first.
+     */
+    fun recipient(text: String, known: (String) -> Boolean = { false }): String? {
+        val line = Regex("(?im)^[ \\t]*to:(.*)$").find(clean(text))?.groupValues?.get(1) ?: return null
+        val all = emailRe.findAll(line).map { it.value.lowercase() }.toList()
+        return all.firstOrNull(known) ?: all.firstOrNull()
+    }
+
+    /** Work trip or not: what you chose before for mail sent [to] that address, else whether it reads like a company booking. */
+    fun isWork(text: String, to: String?, learned: (String) -> Boolean?) = to?.let(learned) ?: isWork(text)
 
     /** Who the booking is for, e.g. "Trip Information For: Jane Q Doe", or null. */
     fun traveler(text: String): String? {

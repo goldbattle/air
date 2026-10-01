@@ -1,7 +1,9 @@
 package com.aria.air
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,8 +11,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -35,10 +39,11 @@ object Imports {
     var busy by mutableStateOf(false)
     var found by mutableStateOf<List<Found>?>(null)
     var traveler by mutableStateOf<String?>(null) // name on the booking, if the document says
-    var work by mutableStateOf(false)             // booked through a company
+    var work by mutableStateOf(false)             // booked through a company, or sent to an address you marked work
+    var to by mutableStateOf<String?>(null)       // the address the email was sent to, if it says
     var error by mutableStateOf<String?>(null)
     val active get() = busy || found != null || error != null
-    fun clear() { busy = false; found = null; traveler = null; work = false; error = null }
+    fun clear() { busy = false; found = null; traveler = null; work = false; to = null; error = null }
 }
 
 /** Reads flights out of a shared/picked file or text, entirely on the phone, then opens the Add screen to review. */
@@ -73,7 +78,8 @@ fun importInto(ctx: Context, uri: Uri?, text: String?, friend: Boolean) {
         } else {
             val found = Importer.parse(t)
             Imports.traveler = Importer.traveler(t)
-            Imports.work = Importer.isWork(t)
+            Imports.to = Importer.recipient(t) { Prefs.workFor(it) != null }
+            Imports.work = Importer.isWork(t, Imports.to, Prefs::workFor)
             Imports.found = found
             if (found.isEmpty()) Imports.error = "No flight numbers found in that document."
         }
@@ -100,6 +106,20 @@ fun sameName(a: String, b: String): Boolean {
     val (p, q) = x.first() to y.first()
     val first = p == q || (kotlin.math.abs(p.length - q.length) == 1 && (p.startsWith(q) || q.startsWith(p)))
     return first && (x.size == 1 || y.size == 1 || x.last() == y.last())
+}
+
+/** People to pick as the traveler: you (""), friends in saved flights, and the booking's name if it's someone new. */
+fun travelerChoices(me: String, friends: List<String>, booking: String?): List<String> =
+    listOf("") + friends + listOfNotNull(booking?.takeIf { b -> !(me.isNotBlank() && sameName(b, me)) && friends.none { sameName(it, b) } })
+
+/**
+ * Who an import is for until you say otherwise: you if the booking has your name, the friend it matches, or the name
+ * on it. No name: you, or nobody yet (null) when adding from Friends.
+ */
+fun defaultTraveler(me: String, friends: List<String>, booking: String?, friendTab: Boolean): String? = when {
+    booking == null -> if (friendTab) null else ""
+    me.isNotBlank() && sameName(booking, me) -> ""
+    else -> friends.firstOrNull { sameName(it, booking) } ?: booking
 }
 
 /** A saved flight this imported one probably is: same number and date, or same route and date. */
@@ -222,6 +242,11 @@ private fun SearchForm(s: Screen.Add, openPicker: () -> Unit, openPaste: () -> U
                 )
                 Hairline(50.dp)
                 Cell("Paste email text", icon = Icons.Filled.ContentPaste, chevron = true, onClick = openPaste)
+                Hairline(50.dp)
+                Cell(
+                    "Print from Gmail", subtitle = "Print the email to \"Save to Air\". Turn on Air in print settings once.",
+                    icon = Icons.Filled.Print, chevron = true,
+                ) { ctx.startActivity(Intent(Settings.ACTION_PRINT_SETTINGS)) }
             }
             Footnote("Read on this phone only. You can also share an email or PDF from Gmail straight to Air.")
         }
@@ -284,29 +309,36 @@ private fun SearchForm(s: Screen.Add, openPicker: () -> Unit, openPaste: () -> U
 
 /**
  * Review of an imported document: whose trip it is (from the name on the booking), personal or work, and which
- * flights to add. Nothing is saved until "Add".
+ * flights to add. Everything read from the document is marked Auto and one tap from fixing; nothing is saved until "Add".
  */
 @Composable
 private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
     val ctx = LocalContext.current
     val found = Imports.found.orEmpty()
     val traveler = Imports.traveler
-    val isMe = traveler != null && Prefs.name.isNotBlank() && sameName(traveler, Prefs.name)
-    // No name on the booking: go by the tab you came from. A name: it's yours if it matches your name.
-    var mine by remember(found) { mutableStateOf(if (traveler == null) !s.friend else isMe) }
-    var friendName by remember(found) { mutableStateOf(if (traveler != null && !isMe) traveler else "") }
+    val friends = Store.friends
+    var who by remember(found) { mutableStateOf(defaultTraveler(Prefs.name, friends, traveler, s.friend)) } // "" = me, null = not chosen
+    var whoAuto by remember(found) { mutableStateOf(traveler != null) }
+    // First time we see a name and don't know yours: ask once, and remember the answer.
     var askedWho by remember(found) { mutableStateOf(traveler == null || Prefs.name.isNotBlank()) }
     var work by remember(found) { mutableStateOf(Imports.work) }
     var items by remember(found) { mutableStateOf(found) }
+    var edited by remember(found) { mutableStateOf(emptySet<String>()) } // "index:field" you changed, no longer Auto
     var picked by remember(found) { mutableStateOf(found.indices.filter { found[it].date != null }.toSet()) }
     var copies by remember(found) { mutableStateOf(emptySet<Int>()) } // already saved, but import separately anyway
     var adding by remember { mutableStateOf(false) }
-    val owner = if (mine) "" else friendName.trim()
+    var edit by remember { mutableStateOf<EditRequest?>(null) }
+    val mine = who == ""
+    val undated = picked.filter { items[it].date == null }
 
     fun cancel() { Imports.clear(); Nav.pop() }
+    fun change(i: Int, field: String, f: (Found) -> Found) { items = items.toMutableList().also { it[i] = f(it[i]) }; edited = edited + "$i:$field" }
+    fun choose(name: String) { who = if (Prefs.name.isNotBlank() && sameName(name, Prefs.name)) "" else name; whoAuto = false }
 
     fun addAll() {
         val list = picked.sorted().map { i -> items[i] to (i in copies) }
+        val owner = who.orEmpty()
+        if (mine) Imports.to?.let { Prefs.setWorkFor(it, work) } // next email to this address starts the same way
         adding = true
         App.scope.launch {
             val ids = mutableListOf<String>()
@@ -317,7 +349,7 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
                 if (flight == null) skipped += f.label else ids += addFlight(ctx, flight, asCopy = copy)
             }
             Imports.clear()
-            Nav.open(if (mine) Tab.Flights else Tab.Friends)
+            Nav.open(if (owner.isEmpty()) Tab.Flights else Tab.Friends)
             if (ids.size == 1) Nav.push(Screen.FlightDetail(ids[0]))
             Toast.makeText(
                 ctx,
@@ -328,7 +360,7 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
         }
     }
 
-    Page("Import", onBack = ::cancel, backLabel = "Cancel") {
+    Page("Review Import", onBack = ::cancel, backLabel = "Cancel") {
         if (Imports.busy) item("busy") {
             Group {
                 Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -347,7 +379,16 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
         }
         if (found.isEmpty()) return@Page
 
-        // First time we see a name and don't know yours: ask once, and remember the answer.
+        item("legend") {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Badge("Auto", C.indigo)
+                Text(
+                    "  was read from the document. Tap any row to fix it; red means it's needed.",
+                    fontSize = 13.sp, color = C.secondary,
+                )
+            }
+        }
+
         if (!askedWho && traveler != null) item("isyou") {
             Group {
                 Column(Modifier.padding(16.dp)) {
@@ -355,12 +396,8 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
                     Text("This booking is for $traveler.", fontSize = 15.sp, color = C.secondary, modifier = Modifier.padding(top = 2.dp))
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button("Yes, that's me", Modifier.weight(1f)) {
-                            Prefs.name = traveler; mine = true; askedWho = true
-                        }
-                        Button("Someone else", Modifier.weight(1f), filled = false) {
-                            mine = false; friendName = traveler; askedWho = true
-                        }
+                        Button("Yes, that's me", Modifier.weight(1f)) { Prefs.name = traveler; who = ""; whoAuto = false; askedWho = true }
+                        Button("Someone else", Modifier.weight(1f), filled = false) { askedWho = true }
                     }
                 }
             }
@@ -368,43 +405,46 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
         }
 
         if (askedWho) item("who") {
-            SectionHeader("Traveler")
+            SectionHeader("Who's flying")
+            val me = if (Prefs.name.isNotBlank()) "Me · ${Prefs.name.substringBefore(' ')}" else "Me"
+            val choices = travelerChoices(Prefs.name, friends, traveler).let { c -> who?.takeIf { it !in c }?.let { c + it } ?: c }
+            val other = { edit = EditRequest("Who's flying", who.orEmpty()) { if (it.isNotBlank()) choose(it) } }
             Group {
-                Column(Modifier.padding(12.dp)) {
-                    Segmented(listOf(if (Prefs.name.isNotBlank()) "Me · ${Prefs.name.substringBefore(' ')}" else "Me", "A friend"), if (mine) 0 else 1) {
-                        mine = it == 0
-                        if (!mine && friendName.isBlank() && traveler != null && !isMe) friendName = traveler
+                ReviewCell("Traveler", who?.let { if (it.isEmpty()) me else it }, whoAuto, required = true, onClick = other)
+                Box(Modifier.padding(start = 16.dp, bottom = 12.dp)) {
+                    Pills(choices.map { if (it.isEmpty()) me else it } + "Other…", choices.indexOf(who)) { i ->
+                        if (i == choices.size) other() else { who = choices[i]; whoAuto = false }
                     }
                 }
-                if (!mine) {
+                if (mine) {
                     Hairline()
-                    FieldCell("Name", friendName, "Who's flying") { friendName = it }
-                } else {
-                    Hairline()
-                    SwitchCell("Work trip", work, if (Imports.work) "Looks like a company booking" else "Counts separately in your passport") { work = it }
-                }
-            }
-            if (!mine) {
-                val names = Store.friends
-                if (names.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Pills(names, names.indexOf(friendName)) { friendName = names[it] }
+                    val to = Imports.to
+                    val learned = to?.let(Prefs::workFor)
+                    SwitchCell(
+                        "Work trip", work,
+                        when {
+                            learned != null -> "Sent to $to, ${if (learned) "a work trip" else "personal"} last time"
+                            Imports.work -> "Looks like a company booking"
+                            to != null -> "Sent to $to · remembered for next time"
+                            else -> "Counts separately in your passport"
+                        },
+                    ) { work = it }
                 }
             }
         }
 
-        item("flights") {
-            SectionHeader("${found.size} flight${if (found.size == 1) "" else "s"} found")
-            Group {
-                items.forEachIndexed { i, f ->
-                    if (i > 0) Hairline(52.dp)
-                    val on = i in picked
+        items.forEachIndexed { i, f ->
+            item("flight$i") {
+                if (i == 0) SectionHeader("${items.size} flight${if (items.size == 1) "" else "s"} found")
+                else Spacer(Modifier.height(12.dp))
+                val on = i in picked
+                fun auto(field: String) = "$i:$field" !in edited
+                Group {
                     Row(
                         Modifier.fillMaxWidth().clickable {
-                            // A flight with no date can't be saved; tapping it asks for one.
-                            if (f.date == null) pickDate(ctx, LocalDate.now()) { d ->
-                                items = items.toMutableList().also { it[i] = f.copy(date = d) }; picked = picked + i
-                            } else picked = if (on) picked - i else picked + i
+                            // A flight with no date can't be saved; including it asks for one.
+                            if (!on && f.date == null) pickDate(ctx, LocalDate.now()) { d -> change(i, "date") { it.copy(date = d) }; picked = picked + i }
+                            else picked = if (on) picked - i else picked + i
                         }.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -421,25 +461,55 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
                                 fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                listOfNotNull(
-                                    f.date?.let(::dayLabel) ?: "No date: tap to set",
-                                    f.dep?.let { "${fmt(it)} – ${f.arr?.let(::fmt) ?: "?"}" },
-                                ).joinToString(" · "),
-                                fontSize = 14.sp, color = if (f.date == null) C.red else C.secondary,
+                                when {
+                                    on -> Db.airline(f.airline)?.name ?: "Will be added"
+                                    f.date == null -> "No date found · tap to add it anyway"
+                                    else -> "Skipped · tap to add"
+                                },
+                                fontSize = 14.sp, color = C.secondary,
                             )
-                            val extras = listOfNotNull(
-                                f.seat.takeIf { it.isNotEmpty() }?.let { "Seat $it" },
-                                f.booking.takeIf { it.isNotEmpty() }?.let { "Conf. $it" },
-                            )
-                            if (extras.isNotEmpty()) Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                extras.forEach { Badge(it, C.indigo) }
+                        }
+                    }
+                    if (on) {
+                        Hairline()
+                        ReviewCell("Flight", f.label, auto("number")) {
+                            edit = EditRequest("Flight number", f.label, caps = true) { v ->
+                                parseFlightNumber(v)?.let { (a, n) -> change(i, "number") { it.copy(airline = a, number = n) } }
                             }
-                            existingFor(f)?.let { old ->
-                                val copy = i in copies
+                        }
+                        Hairline()
+                        ReviewCell("Date", f.date?.let(::dayLabel), auto("date"), required = true) {
+                            pickDate(ctx, f.date ?: LocalDate.now()) { d -> change(i, "date") { it.copy(date = d) } }
+                        }
+                        Hairline()
+                        ReviewCell("Route", if (f.from != null && f.to != null) "${f.from} → ${f.to}" else null, auto("route"), "Looked up when added") {
+                            edit = EditRequest("Route, like PIT SFO", listOfNotNull(f.from, f.to).joinToString(" "), caps = true) { v ->
+                                val c = Regex("[A-Za-z]{3}").findAll(v).map { it.value.uppercase() }.filter { Db.airport(it) != null }.toList()
+                                if (c.size == 2 && c[0] != c[1]) change(i, "route") { it.copy(from = c[0], to = c[1]) }
+                            }
+                        }
+                        Hairline()
+                        ReviewCell("Times", f.dep?.let { "${fmt(it)} – ${f.arr?.let(::fmt) ?: "?"}" }, auto("times"), "From flight status") {
+                            pickTime(ctx, f.dep ?: LocalTime.of(9, 0)) { d ->
+                                pickTime(ctx, f.arr ?: d) { a -> change(i, "times") { it.copy(dep = d, arr = a) } }
+                            }
+                        }
+                        Hairline()
+                        ReviewCell("Seat", f.seat.ifEmpty { null }, auto("seat")) {
+                            edit = EditRequest("Seat", f.seat, caps = true) { v -> change(i, "seat") { it.copy(seat = v.uppercase()) } }
+                        }
+                        Hairline()
+                        ReviewCell("Confirmation", f.booking.ifEmpty { null }, auto("booking")) {
+                            edit = EditRequest("Confirmation code", f.booking, caps = true) { v -> change(i, "booking") { it.copy(booking = v.uppercase()) } }
+                        }
+                        existingFor(f)?.let { old ->
+                            val copy = i in copies
+                            Hairline()
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                                 Text(
                                     "Already saved (${if (old.mine) "yours" else old.friend}, via ${old.source}). " +
                                         if (copy) "Will be added as a copy." else "Will fill in the saved one.",
-                                    fontSize = 13.sp, color = C.orange, modifier = Modifier.padding(top = 4.dp),
+                                    fontSize = 13.sp, color = C.orange,
                                 )
                                 Text(
                                     if (copy) "Fill in existing instead" else "Add as a copy",
@@ -451,20 +521,46 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
                     }
                 }
             }
-            if (found.any { it.from == null || it.to == null }) Footnote("Missing airports are looked up by flight number when you add.")
+        }
+        item("notes") {
             if (copies.isNotEmpty()) Footnote("Copies show up in Settings › Duplicates, where you can merge or keep them.", C.orange)
         }
 
         item("add") {
             Spacer(Modifier.height(16.dp))
             val n = picked.size
+            val owner = who.orEmpty()
             Button(
-                if (adding) "Adding…" else "Add $n flight${if (n == 1) "" else "s"}" + if (!mine && owner.isNotEmpty()) " for ${owner.substringBefore(' ')}" else "",
-                Modifier.fillMaxWidth(), enabled = n > 0 && !adding && (mine || owner.isNotEmpty()),
+                if (adding) "Adding…" else "Add $n flight${if (n == 1) "" else "s"}" + if (owner.isNotEmpty()) " for ${owner.substringBefore(' ')}" else "",
+                Modifier.fillMaxWidth(), enabled = n > 0 && !adding && who != null && undated.isEmpty(),
             ) { addAll() }
-            if (!mine && owner.isEmpty()) Footnote("Add who's flying.", C.orange)
+            when {
+                who == null -> Footnote("Choose who's flying.", C.red)
+                undated.isNotEmpty() -> Footnote("Add a date for ${undated.joinToString { items[it].label }}.", C.red)
+            }
         }
     }
+    EditDialog(edit) { edit = null }
+}
+
+/** A value read from the document: marked Auto until you change it, red when it's [required] and missing. */
+@Composable
+private fun ReviewCell(title: String, value: String?, auto: Boolean, empty: String = "Add", required: Boolean = false, onClick: () -> Unit) = Row(
+    Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(onClick = onClick).padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+    verticalAlignment = Alignment.CenterVertically,
+) {
+    val missing = value == null && required
+    Text(title, fontSize = 17.sp, color = if (missing) C.red else C.label)
+    Spacer(Modifier.weight(1f))
+    if (value != null && auto) {
+        Badge("Auto", C.indigo)
+        Spacer(Modifier.width(8.dp))
+    }
+    Text(
+        value ?: if (required) "Required" else empty, fontSize = 17.sp, maxLines = 1,
+        color = when { missing -> C.red; value == null -> C.tertiary; else -> C.secondary },
+    )
+    Icon(Icons.Filled.ChevronRight, null, tint = C.tertiary)
 }
 
 private fun fmt(t: LocalTime) = t.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))
