@@ -98,6 +98,8 @@ private fun AboutTab() {
     Group {
         Cell("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         Hairline()
+        UpdateRows()
+        Hairline()
         Cell("Built", built.format(DateTimeFormatter.ofPattern("MMM d, h:mm a")))
         Hairline()
         Cell("Commit", BuildConfig.GIT_COMMIT)

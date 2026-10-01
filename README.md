@@ -1,53 +1,50 @@
 # Air
 
-Android flight tracker and travel passport (Jetpack Compose, iOS-style UI). Private by design: everything stays on the phone.
+A private flight tracker and travel passport for Android. Track your own flights and friends' live, see your travel
+history on a map, and import confirmations by just sharing them to the app. Everything stays on the phone.
 
 <!-- screenshots:start -->
 ## Screenshots
 
 Made-up example data (the two flights in the air are real flights at the time of capture). Regenerate with `python tools/screenshots.py`.
 
-| **Flights** | **In flight** | **Before a trip** |
+| **Flights** | **In flight** | **Passport** |
 |---|---|---|
-| <img src="docs/screenshots/flights.png" width="260"> | <img src="docs/screenshots/flight_live.png" width="260"> | <img src="docs/screenshots/flight_pretravel.png" width="260"> |
-| Upcoming trips; a flight in the air shows live progress, speed and altitude. | Route map with the live plane and the phase bar: pre-travel, departure, in the air, arrival. | Countdown, estimated boarding, seat and confirmation, time zone change. |
-| **Schedule & weather** | **History** | **Friends** |
-| <img src="docs/screenshots/flight_details.png" width="260"> | <img src="docs/screenshots/past.png" width="260"> | <img src="docs/screenshots/friends.png" width="260"> |
-| Times, distance, and the weather at takeoff and landing (Open-Meteo). | Every past flight, imported from byAir, PDFs, screenshots or emails. | Friends' flights, tracked live like your own, with alerts when they land. |
-| **Passport** | **Passport lists** | **Import** |
-| <img src="docs/screenshots/passport.png" width="260"> | <img src="docs/screenshots/passport_lists.png" width="260"> | <img src="docs/screenshots/import.png" width="260"> |
-| Your flights on a map with miles, time in the air, airports and countries. | Top airports, airlines and routes; personal and work trips counted separately. | Confirmations read on the phone: traveler, flights, seats and confirmation codes. |
-| **Notifications** | **Widget** | **Settings** |
-| <img src="docs/screenshots/notifications.png" width="260"> | <img src="docs/screenshots/widget.png" width="260"> | <img src="docs/screenshots/settings.png" width="260"> |
-| Live countdown before departure, then flight progress, as ongoing notifications. | Home screen widget with the route map and a big countdown. | Privacy, notifications, data sources, duplicates and backup. |
+| <img src="docs/screenshots/flights.png" width="260"> | <img src="docs/screenshots/flight_live.png" width="260"> | <img src="docs/screenshots/passport.png" width="260"> |
+| Upcoming trips; a flight in the air shows live progress, speed and altitude. | Route map with the live plane and the phase bar: pre-travel, departure, in the air, arrival. | Your flights on a map with miles, time in the air, airports and countries. |
 <!-- screenshots:end -->
 
-## Tabs
+## Features
 
-- **Flights**: upcoming and past flights, grouped by day. Tap **+** to search a flight number and date, or import.
-- **Friends**: the same, for other people's flights, filterable by person. They get the same live progress and alerts.
-- **Passport**: your finished flights on a world map, with miles, time in the air, airports, airlines and countries, by year or all time.
-- **Settings**: About (name, privacy), Notifications, Data (FlightAware key), Backup (export/restore JSON).
+- Live tracking for your own flights and friends', with gate, delay, and takeoff/landing notifications.
+- A flight page with a route map, schedule, weather at both ends, and (while airborne) speed, altitude and heading.
+- Import by sharing a confirmation email, PDF, or screenshot to the app; OCR and PDF text extraction run on-device.
+- A passport view: every past flight on a map, with miles, time in the air, and top airports/airlines/routes.
+- A home screen widget with the route map and a countdown to your next flight.
+- Bundled guides for airports (terminals, maps, lounges) and airlines (check-in, baggage, alliance).
 
-**Flight page**: route map with the live plane, then a phase bar like the airline apps (Pre-travel · Departure · PIT → SFO · Arrival). Each phase has its own stats: countdown, boarding, seat, confirmation; terminal, gate, delay; speed, altitude, heading, time and distance left; arrival gate, baggage belt, time zone change.
+## Install
 
-**Live Updates**: at the gate and in the air, a flight shows an ongoing notification with a progress bar, a countdown chip in the status bar, and speed and altitude. Alerts cover takeoff, landing, delays, gate changes, cancellations, and a reminder before your own flights.
+Download the latest APK from [Releases](https://github.com/goldbattle/air/releases) and sideload it. Air checks
+GitHub for new releases itself (Settings > About > Check for updates, with an optional daily background check) and
+installs them in place.
 
-## Data sources
+## Privacy
 
-| What | Source | Sent |
-|---|---|---|
-| Airports, airlines, coastlines | Bundled (OurAirports, OpenFlights, Natural Earth), rebuilt with `tools/make_data.py` | nothing |
-| Route for a flight number, live position/speed/altitude | [adsb.lol](https://adsb.lol) (free, open data) | callsign |
-| Schedule, delays, gates, baggage | [FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) (optional, your key) | flight number |
-| Import from PDF / screenshot / email | Android PDF text layer and ML Kit OCR, on-device | nothing |
+Air talks to [adsb.lol](https://adsb.lol) for routes and live positions (sends a flight's callsign) and, if you add
+your own key, [FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) for schedules and gates (sends
+the flight number). Nothing else leaves the phone, there's no account and no analytics, and backups are a JSON file
+you export yourself.
 
-Share an email, PDF or screenshot from any app (for example Gmail) to Air to import its flights.
+## Building from source
 
-## Airport and airline guides
+Requires Android Studio or the command line with `ANDROID_SDK_ROOT` set.
 
-Guides for airports (terminals, maps, lounges, tips) and airlines (color, logo, rules) are JSON files in `app/src/main/assets/guides/`. In Claude Code, use `/add-airport SFO` or `/add-airline UA` to research and add one.
+```
+./gradlew assembleRelease   # app/build/outputs/apk/release/app-release.apk, debug-signed for sideloading
+./gradlew testDebugUnitTest
+```
 
-## Build
+---
 
-`./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk` (signed with the debug key for sideloading). Tests: `./gradlew testDebugUnitTest`.
+Copyright (C) 2026 Patrick Geneva. Licensed under the [GPL-3.0](LICENSE).

@@ -50,6 +50,7 @@ class App : Application() {
         Store.onChange = { scope.launch { FlightWidget.refresh(this@App) } }
         Notify.channels(this)
         TrackWorker.schedule(this)
+        Updater.schedule(this)
         scope.launch { Api.backfillWeather() }
     }
 

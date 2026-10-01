@@ -12,8 +12,8 @@ nothing is fetched at runtime, so everything the page shows must be in these fil
 ## Steps
 
 1. **Check the code exists** in `app/src/main/assets/airports.tsv` (`grep -P "^SFO\t"`). If it's missing, add a row in
-   the same tab-separated format (`IATA ICAO name city ISO2 lat lon tz`), sorted by IATA. Or refresh everything with
-   `tools/make_data.py` (download commands are in its docstring).
+   the same tab-separated format (`IATA ICAO name city ISO2 lat lon tz region rank`), sorted by IATA. Or refresh
+   everything with `tools/make_data.py` (download commands are in its docstring).
 2. **Research** with WebSearch/WebFetch, preferring the airport's official site, then the airlines' own pages:
    - terminals / concourses, the airlines in each, gate ranges
    - an official terminal map (image or PDF)

@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Lets the in-flight notification show as a Live Update (status bar chip, lock screen). -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- Self-update from GitHub Releases (Settings > About). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <!-- allowBackup off: flights never go to Google's cloud backup. Use Settings > Backup instead. -->
     <application
@@ -49,6 +52,13 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/flight_widget" />
+        </receiver>
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
         </receiver>
         <!-- ML Kit runs OCR on-device but logs anonymous usage to Google via this backend. Removing it drops
              those logs instead of uploading them. -->

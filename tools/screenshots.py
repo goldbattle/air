@@ -267,8 +267,12 @@ CAPTIONS = [
 ]
 
 
+# Only these make the README; the rest are still captured into docs/screenshots for reference.
+README_SELECT = ["flights", "flight_live", "passport"]
+
+
 def update_readme() -> None:
-    have = [(n, t, c) for n, t, c in CAPTIONS if (OUT / f"{n}.png").exists()]
+    have = [(n, t, c) for n, t, c in CAPTIONS if n in README_SELECT and (OUT / f"{n}.png").exists()]
     rows = []
     for i in range(0, len(have), 3):
         chunk = have[i:i + 3]
