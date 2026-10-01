@@ -5,20 +5,13 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
@@ -27,8 +20,10 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
-private val TABS = listOf("About", "Notifications", "Data", "Duplicates", "Backup")
+// Frequent on the left, rare on the right, so the common ones never need a sideways scroll.
+private val TABS = listOf("About", "Data", "Backup", "Notifications", "Duplicates")
 
 object SettingsNav { var tab by mutableIntStateOf(0) }
 
@@ -39,12 +34,12 @@ fun SettingsScreen() = Page("Settings") {
         Pills(TABS.map { if (it == "Duplicates" && dupes > 0) "$it $dupes" else it }, SettingsNav.tab) { SettingsNav.tab = it }
     }
     item("tab-${SettingsNav.tab}") {
-        when (SettingsNav.tab) {
-            0 -> AboutTab()
-            1 -> NotificationsTab()
-            2 -> DataTab()
-            3 -> DuplicatesTab()
-            else -> BackupTab()
+        when (TABS[SettingsNav.tab]) {
+            "About" -> AboutTab()
+            "Data" -> DataTab()
+            "Backup" -> BackupTab()
+            "Notifications" -> NotificationsTab()
+            else -> DuplicatesTab()
         }
     }
 }
@@ -54,41 +49,17 @@ fun SettingsScreen() = Page("Settings") {
 @Composable
 private fun AboutTab() {
     val built = Instant.ofEpochMilli(BuildConfig.BUILD_TIME).atZone(ZoneId.systemDefault())
-    val mine = Store.flights.count { it.mine }
-    Spacer(Modifier.height(16.dp))
-    Group {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(
-                painterResource(R.drawable.ic_launcher_foreground), null,
-                Modifier.size(64.dp).clip(RoundedCornerShape(14.dp)).background(C.blue),
-            )
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text("Air", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                Text("Your flights, live, and your travel passport", fontSize = 14.sp, color = C.secondary)
-            }
-        }
-    }
+    val mine = Store.flights.filter { it.mine }
+    val miles = mine.filter { !it.cancelled && it.phase() == Phase.Done }.sumOf { it.distanceKm } / KM_PER_MI
     SectionHeader("You")
     Group { FieldCell("Name", Prefs.name, "For your passport") { Prefs.name = it } }
-    SectionHeader("Privacy")
-    Group {
-        Cell("Stored on this phone", "Everything", icon = Icons.Filled.PhoneAndroid)
-        Hairline(50.dp)
-        Cell("Documents & emails", "Read on-device", icon = Icons.Filled.Description)
-        Hairline(50.dp)
-        Cell("Sent over the network", "Flight numbers, airports", icon = Icons.Filled.Public)
-    }
-    Footnote(
-        "Flights, notes, seats and imported documents never leave the phone, and cloud backup is off. " +
-            "To get routes and live status the app asks adsb.lol (and AeroDataBox or FlightAware, if you add a key) about a flight " +
-            "number, and Open-Meteo about the weather at an airport on a date. Nothing else.",
-    )
     SectionHeader("Stats")
     Group {
-        Cell("My flights", "$mine")
+        Cell("My flights", "${mine.size}")
         Hairline()
-        Cell("Friends' flights", "${Store.flights.size - mine}")
+        Cell("Miles flown", fmtInt(miles.roundToInt()))
+        Hairline()
+        Cell("Friends' flights", "${Store.flights.size - mine.size}")
         Hairline()
         Cell("Airports in database", fmtInt(Db.airports.size))
         Hairline()
@@ -97,10 +68,19 @@ private fun AboutTab() {
     SectionHeader("Build")
     Group {
         Cell("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-        Hairline()
-        Cell("Built", built.format(DateTimeFormatter.ofPattern("MMM d, h:mm a")))
+        // "Check for updates" row goes here, directly below the version.
         Hairline()
         Cell("Commit", BuildConfig.GIT_COMMIT)
+        Hairline()
+        Cell("Built", built.format(DateTimeFormatter.ofPattern("MMM d, h:mm a")))
+    }
+    SectionHeader("Privacy")
+    Group {
+        Text(
+            "Only flight numbers, airport coordinates and dates leave this phone, to adsb.lol, Open-Meteo, " +
+                "and AeroDataBox or FlightAware if you add a key. Nothing else does.",
+            fontSize = 14.sp, color = C.secondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        )
     }
 }
 
@@ -143,14 +123,11 @@ private fun NotificationsTab() {
     }
     SectionHeader("System")
     Group {
-        Cell("Notification settings", icon = Icons.Filled.Notifications, chevron = true) {
+        Cell("Notification settings", chevron = true) {
             ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
         }
     }
-    Footnote(
-        "Flights are checked every 2 minutes from 4 hours before departure until landing, and every 30 minutes otherwise. " +
-            "Android may delay checks while the phone is idle; the countdown keeps running.",
-    )
+    Footnote("Checked every 2 minutes from 4 hours before departure until landing, every 30 minutes otherwise.")
 }
 
 // ---------- Data sources ----------
@@ -161,15 +138,13 @@ private fun DataTab() {
     var key by remember { mutableStateOf(Prefs.aeroKey) }
     var test by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
-    SectionHeader("Live tracking")
-    Group {
-        Cell("adsb.lol", "Always on", subtitle = "Routes, live position, speed, altitude · free, open data", icon = Icons.Filled.Radar)
-    }
     var adb by remember { mutableStateOf(Prefs.adbKey) }
     var adbTest by remember { mutableStateOf<String?>(null) }
-    SectionHeader("Weather")
+    SectionHeader("Always on, free")
     Group {
-        Cell("Open-Meteo", "Always on", subtitle = "Takeoff and landing weather, forecast and history · free", icon = Icons.Filled.WbSunny)
+        Cell("adsb.lol", subtitle = "Routes, live position, speed, altitude")
+        Hairline()
+        Cell("Open-Meteo", subtitle = "Takeoff and landing weather")
         Hairline()
         SwitchCell("Celsius", Prefs.flag("celsius", false)) { Prefs.setFlag("celsius", it) }
     }
@@ -186,21 +161,15 @@ private fun DataTab() {
             }
         }
         Hairline()
-        Cell("Get a free key on RapidAPI", icon = Icons.Filled.OpenInNew, chevron = true) {
+        Cell("Get a free key on RapidAPI", chevron = true) {
             runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://rapidapi.com/aedbx-aedbx/api/aerodatabox".toUri())) }
         }
+        Hairline()
+        Cell("Lookups this month", fmtInt(Api.lookupsThisMonth()))
     }
     Footnote(
-        "AeroDataBox (the Basic plan is free) covers flights about a year back and ahead, so it also fills in " +
-            "actual times for past flights when you open them.",
-    )
-    Group {
-        Cell("Status lookups this month", fmtInt(Api.lookupsThisMonth()), icon = Icons.Filled.DataUsage)
-    }
-    Footnote(
-        "Lookups are spaced out by how close a flight is: weekly when it's weeks away, daily in the last two weeks, " +
-            "every 2 hours the day before, every 20 minutes around the gate and landing. Past flights are never " +
-            "looked up automatically; tap refresh on a flight to look it up once.",
+        "The free Basic plan covers flights about a year back and ahead. Lookups get more frequent as a flight " +
+            "gets closer; past flights are only looked up when you tap refresh.",
     )
     SectionHeader("Or FlightAware")
     Group {
@@ -215,15 +184,13 @@ private fun DataTab() {
             }
         }
         Hairline()
-        Cell("FlightAware key: sign in, then API Keys", icon = Icons.Filled.OpenInNew, chevron = true) {
+        Cell("Get a key: sign in, then API Keys", chevron = true) {
             runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://www.flightaware.com/aeroapi/portal/".toUri())) }
         }
     }
     Footnote(
-        "Used only when no AeroDataBox key is set. FlightAware AeroAPI adds times, delays, terminals, gates and baggage belts. " +
-            "Its Personal tier is pay-per-call with a small free monthly allowance; the app calls it about every " +
-            "15 minutes around a flight and every 6 hours before it. Without a key you enter times yourself " +
-            "(or they're read from your confirmation), and takeoff/landing are detected from live ADS-B.",
+        "Used only when no AeroDataBox key is set. Pay-per-call with a small free monthly allowance. " +
+            "Without either key, times come from your confirmation and takeoff/landing from live ADS-B.",
     )
 }
 
@@ -291,16 +258,16 @@ private fun BackupTab() {
     }
     SectionHeader("Backup")
     Group {
-        Cell("Export all flights", icon = Icons.Filled.Upload, chevron = true) { export.launch("air-backup-${LocalDate.now()}.json") }
-        Hairline(50.dp)
-        Cell("Restore from backup", icon = Icons.Filled.Download, chevron = true) { restore.launch(arrayOf("application/json", "*/*")) }
-        Hairline(50.dp)
-        Cell("Import byAir export", subtitle = "The .csv from byAir › Export flights", icon = Icons.Filled.FileOpen, chevron = true) {
+        Cell("Export all flights", chevron = true) { export.launch("air-backup-${LocalDate.now()}.json") }
+        Hairline()
+        Cell("Restore from backup", chevron = true) { restore.launch(arrayOf("application/json", "*/*")) }
+        Hairline()
+        Cell("Import byAir export", subtitle = "The .csv from byAir › Export flights", chevron = true) {
             byAir.launch(arrayOf("text/*", "*/*"))
         }
     }
     Footnote(
-        "Cloud backup is off so your history stays private. Export now and then and keep the file somewhere safe. " +
-            "Restoring adds flights you don't have yet; it never overwrites.",
+        "Cloud backup is off, so export now and then and keep the file somewhere safe. " +
+            "Restoring only adds flights you don't have; it never overwrites.",
     )
 }
