@@ -68,7 +68,8 @@ private fun AboutTab() {
     SectionHeader("Build")
     Group {
         Cell("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-        // "Check for updates" row goes here, directly below the version.
+        Hairline()
+        UpdateRows()
         Hairline()
         Cell("Commit", BuildConfig.GIT_COMMIT)
         Hairline()
