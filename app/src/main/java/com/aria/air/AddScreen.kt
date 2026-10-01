@@ -81,17 +81,17 @@ fun importInto(ctx: Context, uri: Uri?, text: String?, friend: Boolean) {
     }
 }
 
-/** "UA2000", "ua 2000" or the ICAO form "UAL2000" -> ("UA", "2000"). */
+/** "UA1234", "ua 1234" or the ICAO form "UAL1234" -> ("UA", "1234"). */
 fun parseFlightNumber(s: String): Pair<String, String>? {
     val t = s.uppercase().replace(" ", "")
     Regex("^([A-Z]{3})(\\d{1,4})$").find(t)?.let { m -> Db.airlinesByIcao[m.groupValues[1]]?.let { return it.iata to m.groupValues[2].trimStart('0') } }
-    val m = Regex("^([A-Z0-9]{2})(\\d{1,4})$").find(t) ?: return null
+    val m = Regex("^([A-Z][A-Z0-9]|[0-9][A-Z])(\\d{1,4})$").find(t) ?: return null
     return m.groupValues[1] to m.groupValues[2].trimStart('0')
 }
 
 /**
- * "Jane Q Doe", "Janeq Doe" (airlines glue the middle initial on) and "Jane Doe" are the same
- * person; "John Doe" isn't.
+ * "John Q Doe", "Johnq Doe" (airlines glue the middle initial on) and "John Doe" are the same
+ * person; "Jane Doe" isn't.
  */
 fun sameName(a: String, b: String): Boolean {
     val x = a.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
@@ -202,7 +202,7 @@ private fun SearchForm(s: Screen.Add, openPicker: () -> Unit, openPaste: () -> U
     }
 
     fun search() {
-        val p = parsed ?: run { message = "Enter a flight number like UA 2000"; return }
+        val p = parsed ?: run { message = "Enter a flight number like UA 1234"; return }
         message = if (Db.airline(p.first) == null) "Unknown airline code ${p.first}, searching anyway" else null
         searching = true; legs = null
         App.scope.launch {
@@ -237,7 +237,7 @@ private fun SearchForm(s: Screen.Add, openPicker: () -> Unit, openPaste: () -> U
         item("search") {
             SectionHeader("Or search by flight number")
             Group {
-                FieldCell("Flight", number, "UA 2000", caps = true) { number = it; legs = null; message = null }
+                FieldCell("Flight", number, "UA 1234", caps = true) { number = it; legs = null; message = null }
                 Hairline()
                 Cell("Date", dayLabel(date), chevron = true) { pickDate(ctx, date) { date = it; legs = null } }
             }

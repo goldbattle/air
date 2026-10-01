@@ -18,7 +18,12 @@ import java.time.LocalDate
 object Api {
     class HttpError(val code: Int, msg: String) : Exception(msg)
 
-    private fun get(url: String, headers: Map<String, String> = emptyMap()): String {
+    /** Every request goes through here; unit tests swap in canned responses. */
+    internal var http: (url: String, headers: Map<String, String>) -> String = ::fetch
+
+    private fun get(url: String, headers: Map<String, String> = emptyMap()) = http(url, headers)
+
+    private fun fetch(url: String, headers: Map<String, String>): String {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.connectTimeout = 10_000
@@ -33,7 +38,7 @@ object Api {
         }
     }
 
-    /** ICAO callsign as broadcast by the plane: UA2000 -> UAL2000. */
+    /** ICAO callsign as broadcast by the plane: UA1234 -> UAL1234. */
     fun callsign(airline: String, number: String) = (Db.airline(airline)?.icao ?: airline) + number.trimStart('0')
 
     /** Airports the flight number serves, in order ("PIT", "SFO"), or empty when unknown. Multi-stop flights give 3+. */
@@ -50,7 +55,7 @@ object Api {
         val body = runCatching { get("https://api.adsb.lol/v2/callsign/${callsign(f.airline, f.number)}") }.getOrNull()
             ?: return@withContext null
         val ac = JSONObject(body).optJSONArray("ac") ?: return@withContext null
-        val now = Instant.now()
+        val now = Instant.now(clock)
         (0 until ac.length()).map { ac.getJSONObject(it) }.filter { it.has("lat") }.map { a ->
             val alt = a.opt("alt_baro")
             Live(
@@ -176,7 +181,7 @@ object Api {
 
     suspend fun testAdbKey(key: String): String? = withContext(Dispatchers.IO) {
         try {
-            get("https://aerodatabox.p.rapidapi.com/flights/number/UA900/${LocalDate.now()}?withAircraftImage=false&withLocation=false", adbHeaders(key)); null
+            get("https://aerodatabox.p.rapidapi.com/flights/number/UA900/${localToday()}?withAircraftImage=false&withLocation=false", adbHeaders(key)); null
         } catch (e: HttpError) {
             when (e.code) {
                 401, 403 -> "Key rejected (${e.code}): subscribe to AeroDataBox on RapidAPI"
@@ -195,7 +200,7 @@ object Api {
     suspend fun weather(a: Airport, at: Instant): Wx? = withContext(Dispatchers.IO) {
         val utc = at.atZone(java.time.ZoneOffset.UTC)
         val day = utc.toLocalDate()
-        val today = LocalDate.now(java.time.ZoneOffset.UTC)
+        val today = LocalDate.ofInstant(Instant.now(clock), java.time.ZoneOffset.UTC)
         val host = when {
             day < today.minusDays(60) -> "https://archive-api.open-meteo.com/v1/archive"
             day <= today.plusDays(15) -> "https://api.open-meteo.com/v1/forecast"
@@ -209,7 +214,7 @@ object Api {
         val t = h.optJSONArray("temperature_2m")?.opt(i) as? Number ?: return@withContext null
         Wx(
             tempC = t.toDouble(), code = (h.optJSONArray("weather_code")?.opt(i) as? Number)?.toInt() ?: -1,
-            windKmh = (h.optJSONArray("wind_speed_10m")?.opt(i) as? Number)?.toDouble() ?: 0.0, at = at, fetched = Instant.now(),
+            windKmh = (h.optJSONArray("wind_speed_10m")?.opt(i) as? Number)?.toDouble() ?: 0.0, at = at, fetched = Instant.now(clock),
         )
     }
 
@@ -217,7 +222,7 @@ object Api {
     suspend fun refreshWeather(f: Flight): Flight {
         val o = f.origin ?: return f
         val d = f.dest ?: return f
-        val now = Instant.now()
+        val now = Instant.now(clock)
         // Forecasts sharpen as the day nears: daily when days away, every 6 h in the last 3 days, every 3 h on the day.
         fun every(at: Instant) = Duration.between(now, at).let {
             when {
@@ -291,8 +296,8 @@ object Api {
         val ground = alt == "ground"
         val lat = a.getDouble("lat"); val lon = a.getDouble("lon")
         val gs = a.optDouble("gs", 0.0)
-        val at = Instant.now().minusMillis((a.optDouble("seen_pos", 0.0) * 1000).toLong())
-        // Same flight number: either it's already flying our flight, or (multi-leg numbers like UA 1000) it's the
+        val at = Instant.now(clock).minusMillis((a.optDouble("seen_pos", 0.0) * 1000).toLong())
+        // Same flight number: either it's already flying our flight, or (numbers flown as several legs a day) it's the
         // leg before ours, coming into our airport. The clock tells which.
         val sameNumber = cs == callsign(f.airline, f.number)
         // Airborne and fitting our schedule: it's already flying our flight (the live view covers that). On the
@@ -352,13 +357,13 @@ object Api {
     suspend fun refresh(f: Flight, auto: Boolean = false, foreground: Boolean = false): Flight {
         // A takeoff time that can't be ours (saved from another leg or day on the same number) is dropped first.
         var n = if (f.depActual != null && f.tookOff == null) f.copy(depActual = null) else f
-        val now = Instant.now()
+        val now = Instant.now(clock)
         val adbKey = Prefs.adbKey
         val aeroKey = Prefs.aeroKey
         // Automatic lookups follow statusEvery(); only the refresh button (auto = false) goes around it.
         val every = statusEvery(f, now)
         val due = every != null && (f.updated == null || Duration.between(f.updated, now) > every)
-        val today = LocalDate.now()
+        val today = localToday()
         if (!auto || due) {
             val status = when {
                 adbKey.isNotBlank() && f.date in today.minusDays(360)..today.plusDays(360) -> runCatching { adb(n, adbKey) }.getOrNull()
