@@ -270,6 +270,119 @@ class ParseTest {
     }
 
     @Test
+    fun liveFixMustFitTheClock() {
+        val now = java.time.Instant.now()
+        val sfo = Db.airport("SFO")!!; val pit = Db.airport("PIT")!!
+        val path = greatCircle(sfo.lat, sfo.lon, pit.lat, pit.lon, 100)
+        fun fix(i: Int) = Live(path[i].first, path[i].second, 35000, 480, 70.0, 0, now, false)
+        fun f(depInMin: Long) = Flight(
+            airline = "UA", number = "1", date = LocalDate.now(), from = "SFO", to = "PIT",
+            depSched = now.plusSeconds(depInMin * 60), arrSched = now.plusSeconds((depInMin + 300) * 60),
+        )
+        assertTrue(!Api.plausible(f(120), fix(30)))  // not due to leave for 2 h: a plane mid-route is another flight
+        assertTrue(Api.plausible(f(120), fix(0).copy(onGround = true, altFt = 0, speedKt = 5)))  // at the gate
+        assertTrue(!Api.plausible(f(120), fix(0)))   // in the air over the airport before departure: arriving, not us
+        assertTrue(Api.plausible(f(-60), fix(25)))   // an hour after departure, ~900 km out: fits
+        assertTrue(!Api.plausible(f(-60), fix(80)))  // an hour after departure, ~2900 km out: impossible
+    }
+
+    @Test
+    fun inboundRisk() {
+        val now = java.time.Instant.now()
+        val dep = now.plusSeconds(3 * 3600)
+        val base = Flight(airline = "UA", number = "1", date = LocalDate.now(), from = "SFO", to = "PIT", depSched = dep, arrSched = dep.plusSeconds(5 * 3600))
+        fun eta(minBefore: Long) = base.copy(inbound = Inbound("UAL523", "DEN", "SFO", 39.0, -110.0, 30000, 450, false, dep.minusSeconds(minBefore * 60), now))
+        assertEquals(Tone.Good, eta(60).inboundTone())
+        assertEquals(Tone.Warn, eta(30).inboundTone())
+        assertEquals(Tone.Bad, eta(10).inboundTone())
+        val sfo = Db.airport("SFO")!!
+        val here = base.copy(inbound = Inbound("UAL523", "DEN", "SFO", sfo.lat, sfo.lon, 0, 0, true, null, now))
+        assertTrue(here.inboundHere()); assertEquals(Tone.Good, here.inboundTone())
+        assertEquals("UA 523", here.inbound!!.label)
+    }
+
+    @Test
+    fun staleBadDataDoesNotSayInTheAir() {
+        // 6:55 with boarding at 7:30 and takeoff at 8:10: the earlier leg of the same number was saved as ours.
+        val now = java.time.Instant.now()
+        val sfo = Db.airport("SFO")!!
+        val dep = now.plusSeconds(75 * 60)
+        val f = Flight(
+            airline = "UA", number = "1000", date = LocalDate.now(), from = "SFO", to = "PIT",
+            depSched = dep, arrSched = dep.plusSeconds(5 * 3600),
+            depActual = dep.minusSeconds(3 * 3600),                                        // that leg's takeoff
+            live = Live(sfo.lat + 0.5, sfo.lon - 0.3, 19000, 370, 150.0, -1500, now, false), // 60 km out, descending
+        )
+        assertTrue(!f.isAirborne)
+        assertEquals(null, f.tookOff)
+        assertEquals(Phase.Departure, f.phase(now))
+        assertEquals("Upcoming", f.status(now).first)
+    }
+
+    @Test
+    fun inboundOnFinalApproachIsNotUs() {
+        // 6:55, our UA 1000 leaves SFO at 8:10; the earlier UA 1000 leg is 10 km out on final, descending into SFO.
+        val now = java.time.Instant.now()
+        val sfo = Db.airport("SFO")!!
+        val dep = now.plusSeconds(75 * 60)
+        fun f(d: java.time.Instant, l: Live) = Flight(
+            airline = "UA", number = "1000", date = LocalDate.now(), from = "SFO", to = "PIT",
+            depSched = d, arrSched = d.plusSeconds(5 * 3600), live = l,
+        )
+        val approach = Live(sfo.lat + 0.07, sfo.lon - 0.05, 2500, 150, 150.0, -800, now, false) // NW of SFO, heading SE
+        assertTrue(!f(dep, approach).isAirborne)
+        assertEquals("Upcoming", f(dep, approach).status(now).first)
+        // Same approach but our departure time has come: still a landing, not our takeoff.
+        assertTrue(!f(now.minusSeconds(5 * 60), approach).isAirborne)
+        // 5 min after our departure, 10 km out, climbing away east toward PIT: that's us.
+        val climbOut = Live(sfo.lat + 0.02, sfo.lon + 0.1, 6000, 220, 75.0, 2500, now, false)
+        assertTrue(f(now.minusSeconds(5 * 60), climbOut).isAirborne)
+    }
+
+    @Test
+    fun airlineStatusWinsBeforeTakeoff() {
+        val now = java.time.Instant.now()
+        val sfo = Db.airport("SFO")!!
+        val dep = now.plusSeconds(60 * 60)
+        // A tracking fix that looks like us climbing out, but the airline (checked 5 min ago) has no takeoff yet.
+        val f = Flight(
+            airline = "UA", number = "1000", date = LocalDate.now(), from = "SFO", to = "PIT",
+            depSched = dep, depEst = dep, arrSched = dep.plusSeconds(5 * 3600), updated = now.minusSeconds(300),
+            live = Live(sfo.lat, sfo.lon, 0, 8, 0.0, 0, now, true),
+        )
+        assertEquals(Phase.Departure, f.phase(now))
+        assertTrue(f.status(now).first != "In the air")
+    }
+
+    @Test
+    fun boardingDependsOnAircraft() {
+        val f = Flight(airline = "UA", number = "1", date = LocalDate.now(), from = "SFO", to = "PIT")
+        val m = java.time.Duration::ofMinutes
+        assertEquals(m(40), f.copy(aircraft = "B38M").boardingLead)            // 737 MAX 8
+        assertEquals(m(40), f.boardingLead)                                     // unknown yet
+        assertEquals(m(50), f.copy(aircraft = "Boeing 787-9").boardingLead)
+        assertEquals(m(50), f.copy(aircraft = "B77W").boardingLead)
+        assertEquals(m(30), f.copy(aircraft = "Embraer E175").boardingLead)
+        assertEquals(m(30), f.copy(aircraft = "CRJ7").boardingLead)
+    }
+
+    @Test
+    fun planeParkedOvernight() {
+        val sfo = Db.airport("SFO")!!
+        val morning = LocalDate.now().plusDays(1).atTime(7, 0).atZone(sfo.tz).toInstant()
+        val seen = morning.minusSeconds(3 * 3600)
+        val parked = Inbound("UAL1000", "", "SFO", sfo.lat, sfo.lon, 0, 0, true, null, seen)
+        val f = Flight(airline = "UA", number = "1000", date = LocalDate.now().plusDays(1), from = "SFO", to = "PIT", depSched = morning, arrSched = morning.plusSeconds(5 * 3600), inbound = parked)
+        assertTrue(f.inboundOvernight())
+        assertEquals(Tone.Good, f.inboundTone())
+        assertTrue(f.inboundLine()!!.contains("overnight"))
+        // Seen landing: not overnight, and the line says when it landed.
+        val landed = f.copy(inbound = parked.copy(landedAt = seen))
+        assertTrue(!landed.inboundOvernight())
+        assertTrue(landed.inboundLine()!!.contains("landed"))
+    }
+
+    @Test
     fun travelerNames() {
         assertEquals("Jane Doe", Importer.traveler("Passenger: JANE DOE\nSeat 21C"))
         assertEquals(null, Importer.traveler("Thanks for flying with us"))

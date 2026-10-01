@@ -60,10 +60,38 @@ object Api {
                 at = now.minusMillis((a.optDouble("seen_pos", 0.0) * 1000).toLong()),
                 onGround = alt == "ground", aircraft = a.optString("t"), reg = a.optString("r"),
             )
-        }.firstOrNull { onRoute(f, it) }
+        }.firstOrNull { plausible(f, it) }
     }
 
     /** Flight numbers get reused on other legs, so only trust a plane that's roughly between the two airports. */
+    /**
+     * Whether a plane broadcasting this flight's callsign really is this flight today. Airlines reuse numbers on other
+     * legs and days, so besides being between the airports it has to fit the clock: before the scheduled departure it
+     * can only still be at the origin, and after it can't have flown further than a jet could since.
+     */
+    fun plausible(f: Flight, l: Live): Boolean {
+        if (!onRoute(f, l)) return false
+        val o = f.origin ?: return true
+        val dep = f.dep ?: return true // no schedule: the route check is all we have
+        val flownKm = distKm(o.lat, o.lon, l.lat, l.lon)
+        val since = Duration.between(dep.minus(Duration.ofMinutes(20)), l.at)
+        // Before departure only a plane on the ground at the origin can be ours; one in the air nearby is arriving.
+        if (since.isNegative) return l.onGround && flownKm < 15
+        // Near the origin and descending toward it: that's a plane landing there (often our own inbound running
+        // late on the same flight number), not ours taking off.
+        if (!l.onGround && flownKm < 80 && l.vrateFpm < -300 && headingToward(l, o.lat, o.lon)) return false
+        return flownKm <= since.toMinutes() / 60.0 * 1100 + 60 // 1100 km/h is faster than any airliner
+    }
+
+    /** Whether the plane's track points within 60 degrees of the direction to (lat, lon). */
+    private fun headingToward(l: Live, lat: Double, lon: Double): Boolean {
+        val p1 = Math.toRadians(l.lat); val p2 = Math.toRadians(lat); val dl = Math.toRadians(lon - l.lon)
+        val bearing = Math.toDegrees(kotlin.math.atan2(kotlin.math.sin(dl) * kotlin.math.cos(p2),
+            kotlin.math.cos(p1) * kotlin.math.sin(p2) - kotlin.math.sin(p1) * kotlin.math.cos(p2) * kotlin.math.cos(dl)))
+        val diff = kotlin.math.abs(((bearing - l.track) % 360 + 540) % 360 - 180)
+        return diff < 60
+    }
+
     fun onRoute(f: Flight, l: Live): Boolean {
         val o = f.origin ?: return true
         val d = f.dest ?: return true
@@ -238,6 +266,49 @@ object Api {
     }
 
     private val lastLiveTry = java.util.concurrent.ConcurrentHashMap<String, Instant>()
+    private val lastInboundTry = java.util.concurrent.ConcurrentHashMap<String, Instant>()
+
+    /** Follow the inbound plane only in the last 12 h before departure, once its tail number is known. */
+    private fun inboundDue(f: Flight, now: Instant, auto: Boolean, foreground: Boolean): Boolean {
+        if (f.reg.isEmpty() || f.tookOff != null || f.cancelled || f.isAirborne) return false
+        val toDep = Duration.between(now, f.dep ?: f.depGuess)
+        if (toDep.isNegative || toDep > Duration.ofHours(12)) return false
+        if (!auto) return true
+        val every = if (foreground) Duration.ofMinutes(2) else Duration.ofMinutes(10)
+        return lastInboundTry[f.id]?.let { Duration.between(it, now) >= every } != false
+    }
+
+    /**
+     * Where the plane assigned to [f] is now (adsb.lol, by tail number) and when it reaches our departure airport.
+     * Null when it isn't broadcasting (parked with transponder off) or is already flying our flight.
+     */
+    suspend fun inbound(f: Flight): Inbound? = withContext(Dispatchers.IO) {
+        val o = f.origin ?: return@withContext null
+        val ac = JSONObject(get("https://api.adsb.lol/v2/reg/${f.reg}")).optJSONArray("ac") ?: return@withContext null
+        val a = (0 until ac.length()).map { ac.getJSONObject(it) }.firstOrNull { it.has("lat") } ?: return@withContext null
+        val cs = a.optString("flight").trim()
+        val alt = a.opt("alt_baro")
+        val ground = alt == "ground"
+        val lat = a.getDouble("lat"); val lon = a.getDouble("lon")
+        val gs = a.optDouble("gs", 0.0)
+        val at = Instant.now().minusMillis((a.optDouble("seen_pos", 0.0) * 1000).toLong())
+        // Same flight number: either it's already flying our flight, or (multi-leg numbers like UA 1000) it's the
+        // leg before ours, coming into our airport. The clock tells which.
+        val sameNumber = cs == callsign(f.airline, f.number)
+        // Airborne and fitting our schedule: it's already flying our flight (the live view covers that). On the
+        // ground at our gate before we leave, it's simply our plane waiting, which is what this section shows.
+        if (sameNumber && !ground && plausible(f, Live(lat, lon, 0, gs.toInt(), 0.0, 0, at, ground))) return@withContext null
+        val route = if (cs.isNotEmpty() && !sameNumber) runCatching {
+            JSONObject(get("https://vrs-standing-data.adsb.lol/routes/${cs.take(2)}/$cs.json"))
+                .optString("_airport_codes_iata").split("-").filter { it.length == 3 }
+        }.getOrDefault(emptyList()) else emptyList()
+        val headedHere = sameNumber || route.isEmpty() || route.last() == f.from
+        // Straight line at current speed plus ~10 min for approach and taxi.
+        val eta = if (!ground && headedHere && gs > 100) {
+            at.plusSeconds((distKm(lat, lon, o.lat, o.lon) / (gs * 1.852) * 3600).toLong() + 600)
+        } else null
+        Inbound(cs, route.firstOrNull().orEmpty(), if (sameNumber) f.from else route.lastOrNull().orEmpty(), lat, lon, (alt as? Number)?.toInt() ?: 0, gs.toInt(), ground, eta, at)
+    }
 
     /**
      * How often to ask adsb.lol where the plane is (free, but still battery and data), or null when there's nothing
@@ -279,7 +350,8 @@ object Api {
      * every 15 min around the flight, every 6 h before it.
      */
     suspend fun refresh(f: Flight, auto: Boolean = false, foreground: Boolean = false): Flight {
-        var n = f
+        // A takeoff time that can't be ours (saved from another leg or day on the same number) is dropped first.
+        var n = if (f.depActual != null && f.tookOff == null) f.copy(depActual = null) else f
         val now = Instant.now()
         val adbKey = Prefs.adbKey
         val aeroKey = Prefs.aeroKey
@@ -324,6 +396,28 @@ object Api {
             if (l != null && l.onGround && key.isBlank() && n.depActual != null && n.dest?.let { distKm(l.lat, l.lon, it.lat, it.lon) < 10 } == true) {
                 n = n.copy(arrActual = n.arrActual ?: l.at)
             }
+        }
+        if (inboundDue(n, now, auto, foreground)) {
+            lastInboundTry[n.id] = now
+            val prev = n.inbound
+            val fresh = runCatching { inbound(n) }.getOrNull()?.let { i ->
+                // Remember when it touched down here: airborne last time, on the ground now.
+                val landed = prev?.landedAt?.takeIf { i.onGround } ?: if (prev != null && !prev.onGround && i.onGround) i.at else null
+                i.copy(landedAt = landed, firstSeen = prev?.firstSeen ?: i.at)
+            }
+            val o = n.origin
+            val quietAfterLanding = fresh == null && prev != null && !prev.onGround && prev.to == n.from && o != null &&
+                prev.eta != null && now > prev.eta.minus(Duration.ofMinutes(10))
+            n = n.copy(
+                inbound = when {
+                    fresh != null -> fresh
+                    // Went quiet around its expected landing here: it landed and parked (transponders go off at the gate).
+                    quietAfterLanding -> prev!!.copy(
+                        onGround = true, lat = o!!.lat, lon = o.lon, altFt = 0, speedKt = 0, eta = null, landedAt = prev.eta,
+                    )
+                    else -> prev
+                },
+            )
         }
         return runCatching { refreshWeather(n) }.getOrDefault(n)
     }

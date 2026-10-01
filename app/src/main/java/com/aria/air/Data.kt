@@ -131,6 +131,61 @@ fun Wx.temp() = if (Prefs.flag("celsius", false)) "${Math.round(tempC)}°C" else
 fun Wx.wind() = if (Prefs.flag("celsius", false)) "${Math.round(windKmh)} km/h" else "${Math.round(windKmh / KM_PER_MI)} mph"
 fun Wx.short() = "${icon()} ${temp()}"
 
+/**
+ * The aircraft assigned to a flight, seen on its previous flight (by tail number, from adsb.lol): where it is and
+ * when it gets to our departure airport. [from]/[to] are that flight's route when known.
+ */
+data class Inbound(
+    val callsign: String, val from: String, val to: String,
+    val lat: Double, val lon: Double, val altFt: Int, val speedKt: Int, val onGround: Boolean,
+    val eta: Instant?, val at: Instant,
+    /** When we saw it touch down at our airport (null if it was already parked when we started watching). */
+    val landedAt: Instant? = null,
+    /** First time we saw it at all, to tell "landed an hour ago" from "was already there, probably overnight". */
+    val firstSeen: Instant = at,
+) {
+    /** "UA 523" from the callsign "UAL523". */
+    val label: String get() = Db.airlinesByIcao[callsign.take(3)]?.let { "${it.iata} ${callsign.drop(3)}" } ?: callsign
+}
+
+/** Minutes between the inbound plane reaching our airport and our departure, or null when unknown. */
+fun Flight.inboundSpare(): Long? = inbound?.eta?.let { Duration.between(it, dep ?: depGuess).toMinutes() }
+
+/** Whether the inbound plane is already parked at our departure airport. */
+fun Flight.inboundHere(): Boolean = inbound?.let { i ->
+    i.onGround && origin?.let { o -> distKm(o.lat, o.lon, i.lat, i.lon) < 8 } == true
+} == true
+
+/**
+ * Parked at our airport since before we started watching, for a morning departure: it most likely spent the night
+ * there, which is the best case (no inbound flight to be late).
+ */
+fun Flight.inboundOvernight(): Boolean {
+    val i = inbound ?: return false
+    return inboundHere() && i.landedAt == null && ((dep ?: depGuess).atZone(fromTz).hour < 11)
+}
+
+/** How worrying the inbound is: a plane needs roughly 30-45 min on the ground between flights. */
+fun Flight.inboundTone(): Tone = when {
+    inbound == null -> Tone.Neutral
+    inboundHere() -> Tone.Good
+    else -> inboundSpare()?.let { if (it >= 45) Tone.Good else if (it >= 25) Tone.Warn else Tone.Bad } ?: Tone.Neutral
+}
+
+/** One line for the card and the flight page: "UA 523 from DEN lands 7:32 AM · 38 min to spare". */
+fun Flight.inboundLine(): String? {
+    val i = inbound ?: return null
+    val spare = inboundSpare()
+    return when {
+        inboundHere() -> "Your plane is at the gate at $from" +
+            (i.landedAt?.let { " · landed ${time(it, fromTz)}" } ?: if (inboundOvernight()) " · likely overnight" else "")
+        i.onGround -> "Your plane is on the ground" + (if (i.to.isNotEmpty() && i.to != from) " before its flight to ${i.to}" else "")
+        i.eta != null -> "${i.label}${if (i.from.isNotEmpty()) " from ${i.from}" else ""} lands ${time(i.eta, fromTz)}" +
+            (spare?.let { if (it >= 0) " · ${span(Duration.ofMinutes(it))} to spare" else " · ${span(Duration.ofMinutes(-it))} after your departure" } ?: "")
+        else -> "${i.label} ${i.from} → ${i.to}"
+    }
+}
+
 /** Last ADS-B fix for a flight (from adsb.lol). */
 data class Live(
     val lat: Double, val lon: Double, val altFt: Int, val speedKt: Int, val track: Double, val vrateFpm: Int,
@@ -154,6 +209,7 @@ data class Flight(
     val source: String = "manual",    // manual, search, pdf, image, email, text
     val work: Boolean = false,        // business trip (my flights)
     val depWx: Wx? = null, val arrWx: Wx? = null, // weather at takeoff and landing
+    val inbound: Inbound? = null,     // the plane's previous flight, before ours
     val live: Live? = null,
     val updated: Instant? = null,     // last successful status refresh
     val alerted: String = "",         // events already notified (comma list), so alerts fire once
@@ -169,7 +225,7 @@ val Flight.toTz: ZoneId get() = dest?.tz ?: ZoneId.systemDefault()
 val Flight.distanceKm: Double get() = origin?.let { o -> dest?.let { distKm(o, it) } } ?: 0.0
 
 /** Best known departure/arrival: actual, then estimate, then schedule. */
-val Flight.dep get() = depActual ?: depEst ?: depSched
+val Flight.dep get() = tookOff ?: depEst ?: depSched
 val Flight.arr get() = arrActual ?: arrEst ?: arrSched
 
 /** Typical block time when no schedule is known: cruise at ~500 mph plus 30 min taxi/climb. */
@@ -197,10 +253,10 @@ val Flight.hasLiveStatus: Boolean
 
 /** Late (+) or early (-) in minutes: actual times always count, estimates only once they're live. Null = unknown. */
 val Flight.depDelay: Long?
-    get() = depSched?.let { s -> (depActual ?: depEst?.takeIf { hasLiveStatus })?.let { Duration.between(s, it).toMinutes() } }
+    get() = depSched?.let { s -> (tookOff ?: depEst?.takeIf { hasLiveStatus })?.let { Duration.between(s, it).toMinutes() } }
 val Flight.arrDelay: Long?
     get() = arrSched?.let { s ->
-        (arrActual ?: arrEst?.takeIf { hasLiveStatus || depActual != null })?.let { Duration.between(s, it).toMinutes() }
+        (arrActual ?: arrEst?.takeIf { hasLiveStatus || tookOff != null })?.let { Duration.between(s, it).toMinutes() }
     }
 
 /** The phases of a trip, as in the airline apps: before, at the gate, in the air, after landing. */
@@ -208,13 +264,28 @@ enum class Phase(val title: String) { PreTravel("Pre-travel"), Departure("Depart
 
 private val FRESH = Duration.ofMinutes(10)
 
+/** Re-checked every time, so a bad fix saved earlier (another plane on the same number) can't keep us "in the air". */
 val Flight.isAirborne: Boolean
-    get() = live != null && !live.onGround && Duration.between(live.at, Instant.now()) < FRESH
+    get() = live != null && !live.onGround && live.speedKt >= 60 && Duration.between(live.at, Instant.now()) < FRESH &&
+        Api.plausible(this, live)
+
+/** A status fetched in the last 30 minutes, from a service that would report takeoff, shows none yet. */
+fun Flight.airlineSaysNotDeparted(now: Instant = Instant.now()): Boolean {
+    val planned = depEst ?: depSched ?: return false
+    return updated != null && Duration.between(updated, now) < Duration.ofMinutes(30) && depActual == null &&
+        now < planned.plus(Duration.ofMinutes(30))
+}
+
+/** A takeoff time we believe: none more than an hour before the schedule (that would be another day's or leg's). */
+val Flight.tookOff: Instant?
+    get() = depActual?.takeIf { a -> depSched == null || a > depSched.minus(Duration.ofHours(1)) }
 
 fun Flight.phase(now: Instant = Instant.now()): Phase = when {
     cancelled -> if (now < depGuess.plus(Duration.ofHours(6))) Phase.Departure else Phase.Done
     arrActual != null -> if (now < arrActual.plus(Duration.ofHours(1))) Phase.Arrival else Phase.Done
-    isAirborne || depActual != null && now < arrGuess -> Phase.InFlight
+    // The airline says it hasn't left yet (a fresh status with no takeoff time): believe it over any tracking data.
+    airlineSaysNotDeparted(now) -> if (now < depGuess.minus(Duration.ofHours(3))) Phase.PreTravel else Phase.Departure
+    isAirborne || tookOff != null && now < arrGuess -> Phase.InFlight
     now < depGuess.minus(Duration.ofHours(3)) -> Phase.PreTravel
     now < depGuess -> Phase.Departure
     now < arrGuess -> Phase.InFlight
@@ -255,7 +326,8 @@ fun Flight.status(now: Instant = Instant.now()): Pair<String, Tone> {
         cancelled -> "Cancelled" to Tone.Bad
         diverted -> "Diverted" to Tone.Bad
         arrActual != null -> (if ((arrDelay ?: 0) >= 15) "Landed ${span(Duration.ofMinutes(arrDelay!!))} late" else "Landed") to Tone.Good
-        phase(now) == Phase.InFlight -> (if (isAirborne || depActual != null) "In the air" else "Departed") to Tone.Info
+        // Past the scheduled time with no takeoff seen (no signal, no status key): don't claim it's flying.
+        phase(now) == Phase.InFlight -> (if (isAirborne || tookOff != null) "In the air" else "Due to depart") to Tone.Info
         phase(now) == Phase.Arrival || phase(now) == Phase.Done -> "Arrived" to Tone.Good
         delay != null && delay >= 15 -> "Delayed ${span(Duration.ofMinutes(delay))}" to (if (delay >= 60) Tone.Bad else Tone.Warn)
         hasLiveStatus -> "On time" to Tone.Good
@@ -284,6 +356,12 @@ fun Flight.toJson(): JSONObject = JSONObject()
         fun wx(w: Wx) = JSONObject().put("t", w.tempC).put("code", w.code).put("wind", w.windKmh)
             .put("at", w.at.toEpochMilli()).put("fetched", w.fetched.toEpochMilli())
         depWx?.let { put("depWx", wx(it)) }
+        inbound?.let {
+            put("inbound", JSONObject().put("callsign", it.callsign).put("from", it.from).put("to", it.to)
+                .put("lat", it.lat).put("lon", it.lon).put("alt", it.altFt).put("gs", it.speedKt).put("ground", it.onGround)
+                .put("at", it.at.toEpochMilli()).put("firstSeen", it.firstSeen.toEpochMilli())
+                .apply { it.eta?.let { e -> put("eta", e.toEpochMilli()) }; it.landedAt?.let { l -> put("landedAt", l.toEpochMilli()) } })
+        }
         arrWx?.let { put("arrWx", wx(it)) }
         live?.let {
             put("live", JSONObject().put("lat", it.lat).put("lon", it.lon).put("alt", it.altFt).put("gs", it.speedKt)
@@ -305,6 +383,15 @@ fun flightFrom(j: JSONObject) = Flight(
     friend = j.optString("friend"), source = j.optString("source", "manual"), work = j.optBoolean("work"), updated = j.inst("updated"),
     alerted = j.optString("alerted"),
     depWx = j.optJSONObject("depWx")?.let(::wxFrom), arrWx = j.optJSONObject("arrWx")?.let(::wxFrom),
+    inbound = j.optJSONObject("inbound")?.let {
+        Inbound(
+            it.getString("callsign"), it.optString("from"), it.optString("to"), it.getDouble("lat"), it.getDouble("lon"),
+            it.optInt("alt"), it.optInt("gs"), it.optBoolean("ground"),
+            if (it.has("eta")) Instant.ofEpochMilli(it.getLong("eta")) else null, Instant.ofEpochMilli(it.getLong("at")),
+            if (it.has("landedAt")) Instant.ofEpochMilli(it.getLong("landedAt")) else null,
+            Instant.ofEpochMilli(it.optLong("firstSeen", it.getLong("at"))),
+        )
+    },
     live = j.optJSONObject("live")?.let {
         Live(it.getDouble("lat"), it.getDouble("lon"), it.getInt("alt"), it.getInt("gs"), it.getDouble("track"),
             it.optInt("vrate"), Instant.ofEpochMilli(it.getLong("at")), it.optBoolean("ground"),

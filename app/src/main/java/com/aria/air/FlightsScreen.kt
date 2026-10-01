@@ -188,6 +188,19 @@ fun FlightCard(f: Flight, now: Instant, showFriend: Boolean = false, onClick: ()
                 }
                 Endpoint(f.to, f.dest?.city, f.arr, f.arrSched, f.toTz, f.arrDelay, Alignment.End, Modifier.weight(1f))
             }
+            // The plane we're waiting for, in the hours before departure.
+            if (phase <= Phase.Departure) f.inboundLine()?.let { line ->
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(toneColor(f.inboundTone()).copy(alpha = 0.1f))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Flight, null, tint = toneColor(f.inboundTone()), modifier = Modifier.size(16.dp).rotate(135f))
+                    Spacer(Modifier.width(8.dp))
+                    Text(line, fontSize = 13.sp, color = toneColor(f.inboundTone()), maxLines = 2)
+                }
+            }
             if (phase == Phase.InFlight) {
                 Spacer(Modifier.height(12.dp))
                 ProgressLine(f.progress(now))

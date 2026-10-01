@@ -92,7 +92,7 @@ private fun headline(f: Flight, now: Instant): Pair<String, String> {
         Phase.InFlight -> "Lands in" to left(f.arr ?: f.arrGuess)
         Phase.Arrival, Phase.Done -> "Landed" to time(f.arrActual ?: f.arr ?: f.arrGuess, f.toTz)
         else -> {
-            val boarding = dep.minus(BOARDING)
+            val boarding = dep.minus(f.boardingLead)
             if (f.dep != null && now < boarding && Duration.between(now, boarding) < Duration.ofHours(4)) "Boarding in" to left(boarding)
             else if (f.dep == null) "Departs" to dayLabel(f.date)
             else "Departs in" to left(dep)

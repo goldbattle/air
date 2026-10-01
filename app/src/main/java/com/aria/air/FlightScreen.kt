@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -104,6 +105,7 @@ fun FlightScreen(id: String) {
                             else -> ArrivalPanel(f, now)
                         }
                     }
+                    if (phase <= Phase.Departure && Duration.between(now, f.dep ?: f.depGuess) < Duration.ofHours(24)) YourPlane(f, now)
                     SectionHeader("Schedule")
                     TimesCard(f)
                     SectionHeader("Details")
@@ -266,7 +268,7 @@ private fun PreTravelPanel(f: Flight, now: Instant, onEdit: (EditRequest) -> Uni
     )
     Hairline()
     StatRow(
-        stat("Est. boarding", if (f.dep != null) time(dep.minus(BOARDING), f.fromTz) else "—"),
+        stat("Est. boarding", f.boarding?.let { time(it, f.fromTz) } ?: "—"),
         stat("Seat", f.seat.ifEmpty { "—" }, if (f.seat.isNotEmpty()) C.blue else null),
         stat("Flight time", span(f.duration)),
     )
@@ -291,7 +293,7 @@ private fun DeparturePanel(f: Flight, now: Instant) {
     Big(
         when {
             f.cancelled -> "Cancelled"
-            f.depActual != null -> "Departed ${time(f.depActual, f.fromTz)}"
+            f.tookOff != null -> "Departed ${time(f.tookOff, f.fromTz)}"
             left.isEmpty() -> "Departing"
             else -> "Departs in $left"
         },
@@ -306,7 +308,7 @@ private fun DeparturePanel(f: Flight, now: Instant) {
     StatRow(
         stat("Terminal", f.depTerminal.ifEmpty { "—" }),
         stat("Gate", f.depGate.ifEmpty { "—" }, if (f.depGate.isNotEmpty()) C.blue else null),
-        stat(if (f.depActual != null) "Departed" else "Departs", time(f.dep, f.fromTz), delayColor(delay)),
+        stat(if (f.tookOff != null) "Departed" else "Departs", time(f.dep, f.fromTz), delayColor(delay)),
     )
     WeatherCell(f.depWx, "takeoff", f.origin?.city ?: f.from)
     Hairline()
@@ -445,6 +447,92 @@ private fun WeatherCell(w: Wx?, event: String, city: String) {
             )
         }
         Text(w.temp(), fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * The aircraft for this flight on its previous flight: collapsed to one line with a verdict, expanding to where it
+ * is, when it lands here and what that means for our departure.
+ */
+@Composable
+private fun YourPlane(f: Flight, now: Instant) {
+    var open by remember(f.id) { mutableStateOf(false) }
+    val i = f.inbound
+    SectionHeader("Your plane")
+    Group(Modifier.animateContentSize()) {
+        if (f.reg.isEmpty()) {
+            Text(
+                if (Prefs.hasStatusKey) "The airline hasn't assigned an aircraft yet, usually about a day before. Its inbound flight shows here once it has."
+                else "Add an AeroDataBox or FlightAware key (Settings › Data) to see the aircraft for this flight and whether its previous flight is on time.",
+                fontSize = 15.sp, color = C.secondary, modifier = Modifier.padding(16.dp),
+            )
+            return@Group
+        }
+        val tone = f.inboundTone()
+        val verdict = when {
+            i == null -> "Probably parked"
+            f.inboundOvernight() -> "Here since last night"
+            f.inboundHere() -> "At the gate"
+            tone == Tone.Good -> "On track"
+            tone == Tone.Warn -> "Tight turnaround"
+            tone == Tone.Bad -> "Likely to delay you"
+            else -> "Watching"
+        }
+        Row(
+            Modifier.fillMaxWidth().clickable { open = !open }.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Flight, null, tint = toneColor(tone), modifier = Modifier.size(22.dp).rotate(135f))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(verdict, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = toneColor(tone).takeIf { tone != Tone.Neutral } ?: C.label)
+                Text(
+                    f.inboundLine() ?: "${f.reg} isn't broadcasting yet. Planes usually switch their transponder off at the gate " +
+                        "(overnight, for example); it shows up here as soon as it powers up or moves.",
+                    fontSize = 13.sp, color = C.secondary,
+                )
+            }
+            Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, tint = C.tertiary)
+        }
+        if (open) {
+            Hairline()
+            if (i != null && f.inboundHere()) {
+                // Parked here: when it arrived and how long it has to turn around.
+                val since = i.landedAt ?: i.firstSeen
+                StatRow(
+                    stat("Arrived", i.landedAt?.let { time(it, f.fromTz) } ?: if (f.inboundOvernight()) "Overnight" else "Earlier"),
+                    stat("On the ground", span(Duration.between(since, now)) + if (i.landedAt == null) "+" else ""),
+                    stat("Before you leave", span(Duration.between(now, f.dep ?: f.depGuess).let { if (it.isNegative) Duration.ZERO else it }), C.green),
+                )
+                if (i.from.isNotEmpty() || i.label.isNotEmpty()) StatRow(
+                    stat("Last flight", i.label.ifEmpty { "—" }),
+                    stat("Came from", i.from.ifEmpty { "—" }),
+                    stat("Last signal", span(Duration.between(i.at, now).let { if (it.isNegative) Duration.ZERO else it }) + " ago"),
+                )
+                Hairline()
+            }
+            if (i != null && !f.inboundHere()) {
+                StatRow(
+                    stat("Flight", i.label.ifEmpty { "—" }),
+                    stat("Lands here", i.eta?.let { time(it, f.fromTz) } ?: "—", toneColor(tone).takeIf { i.eta != null }),
+                    stat("To spare", f.inboundSpare()?.let { if (it >= 0) span(Duration.ofMinutes(it)) else "-" + span(Duration.ofMinutes(-it)) } ?: "—", toneColor(tone)),
+                )
+                StatRow(
+                    stat("Coming from", i.from.ifEmpty { "—" }),
+                    stat(if (i.onGround) "On ground" else "Speed", if (i.onGround) "yes" else "${(i.speedKt * 1.15078).roundToInt()} mph"),
+                    stat("Altitude", if (i.onGround) "—" else "${fmtInt(i.altFt)} ft"),
+                )
+                Hairline()
+            }
+            Cell("Aircraft", listOf(f.aircraft, f.reg).filter { it.isNotEmpty() }.joinToString(" · "))
+            Hairline()
+            Text(
+                (i?.let { "Position ${ago(it.at)} from adsb.lol. " } ?: "") +
+                    "A plane usually needs 30 to 45 minutes on the ground between flights, so an inbound landing with less " +
+                    "time to spare before your departure often means a delay, even before the airline announces one.",
+                fontSize = 13.sp, color = C.secondary, modifier = Modifier.padding(16.dp),
+            )
+        }
     }
 }
 

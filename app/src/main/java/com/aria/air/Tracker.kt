@@ -160,7 +160,7 @@ object Notify {
         val landed = phase == Phase.Arrival
         val dep = f.dep ?: f.depGuess
         val arr = f.arr ?: f.arrGuess
-        val boarding = dep.minus(BOARDING)
+        val boarding = dep.minus(f.boardingLead)
         val l = f.live
         val text = when {
             landed -> buildString {
@@ -255,17 +255,25 @@ object Notify {
         }
         val name = "${who(new)}${new.label}"
         if (new.cancelled) once("cancelled", "$name cancelled", "${new.from} → ${new.to} on ${dayLabel(new.date)}")
+        // The plane we're waiting for is running late: alert once per 10-minute step of its arrival estimate.
+        if (new.inboundTone() == Tone.Bad && new.tookOff == null) {
+            val i = new.inbound!!
+            once(
+                "inbound${(i.eta?.epochSecond ?: 0) / 600}", "$name: your plane is running late",
+                "${new.inboundLine()}. A departure delay is likely.",
+            )
+        }
         // The airline retimed the flight (often weeks ahead). Keyed by the new time, so each change alerts once.
         val was = old.depSched
         val now = new.depSched
-        if (was != null && now != null && new.depActual == null && Duration.between(was, now).abs() >= Duration.ofMinutes(5)) {
+        if (was != null && now != null && new.tookOff == null && Duration.between(was, now).abs() >= Duration.ofMinutes(5)) {
             once(
                 "sched${now.epochSecond}", "$name schedule change",
                 "Now departs ${dayLabel(now.atZone(new.fromTz).toLocalDate())} at ${time(now, new.fromTz)} (was ${time(was, new.fromTz)})",
             )
         }
         if (new.diverted) once("diverted", "$name diverted", "Was flying ${new.from} → ${new.to}")
-        if (new.depActual != null || new.isAirborne) {
+        if (new.tookOff != null || new.isAirborne) {
             once("departed", "$name took off", "${new.from} → ${new.to}, lands ${time(new.arr ?: new.arrGuess, new.toTz)} local")
         }
         if (new.arrActual != null) {
@@ -275,7 +283,7 @@ object Notify {
         }
         // Delay and gate alerts re-fire when the value changes, keyed by the value.
         val delay = new.depDelay
-        if (delay != null && delay >= 15 && new.depActual == null && delay != old.depDelay) {
+        if (delay != null && delay >= 15 && new.tookOff == null && delay != old.depDelay) {
             once("delay$delay", "$name delayed ${span(Duration.ofMinutes(delay))}", "Now departs ${time(new.dep, new.fromTz)} from ${new.from}")
         }
         if (new.depGate.isNotEmpty() && old.depGate.isNotEmpty() && new.depGate != old.depGate) {
@@ -303,7 +311,7 @@ object Notify {
             if (h > 0 && left <= Duration.ofHours(h.toLong()) && "reminder" !in sent) {
                 sent += "reminder"
                 alert(ctx, f, "reminder", "${f.label} to ${f.dest?.city ?: f.to} leaves in ${span(left)}",
-                    "Boarding ${time(dep.minus(BOARDING), f.fromTz)} at ${f.from}" + (if (f.depGate.isNotEmpty()) ", gate ${f.depGate}" else ""))
+                    "Boarding ${time(dep.minus(f.boardingLead), f.fromTz)} at ${f.from}" + (if (f.depGate.isNotEmpty()) ", gate ${f.depGate}" else ""))
             }
             val joined = sent.joinToString(",")
             if (joined != f.alerted) Store.upsert(f.copy(alerted = joined))
@@ -311,6 +319,22 @@ object Notify {
     }
 }
 
-/** Typical boarding lead for narrow-body flights. */
-// ponytail: fixed 40 min; airlines board wide-bodies ~50-60 min out. A per-airline value in the airline guide would fix it.
-val BOARDING: Duration = Duration.ofMinutes(40)
+/**
+ * How long before departure boarding usually starts, by aircraft: about 50 min for twin-aisle jets, 30 for regional
+ * jets and turboprops, 40 for everything else (and when the aircraft isn't known yet).
+ */
+// ponytail: typical US-airline values by aircraft size; airlines don't publish boarding times in the status feeds.
+val Flight.boardingLead: Duration
+    get() {
+        val a = aircraft.uppercase().replace(" ", "")
+        val wide = listOf("B77", "B78", "B74", "B76", "A33", "A34", "A35", "A38", "777", "787", "747", "767", "A330", "A340", "A350", "A380")
+        val regional = listOf("CRJ", "E17", "E75", "E19", "ERJ", "DH8", "AT7", "AT4", "DASH", "EMBRAER", "CANADAIR")
+        return when {
+            wide.any { it in a } -> Duration.ofMinutes(50)
+            regional.any { it in a } -> Duration.ofMinutes(30)
+            else -> Duration.ofMinutes(40)
+        }
+    }
+
+/** Estimated start of boarding, or null without a departure time. */
+val Flight.boarding: Instant? get() = dep?.minus(boardingLead)
