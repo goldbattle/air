@@ -10,10 +10,8 @@
         <exclude .../>
         -->
     </cloud-backup>
-    <!--
+    <!-- Linked mail accounts (encrypted app passwords) and found emails stay on this phone. -->
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="file" path="mail.json" />
     </device-transfer>
-    -->
 </data-extraction-rules>

@@ -1,0 +1,336 @@
+package com.aria.air
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.security.KeyStore
+import java.time.LocalDate
+import java.util.Base64
+import java.util.concurrent.TimeUnit
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+/** A linked mailbox. [secret] is the app password, encrypted by [Vault]; [lastUid] is how far scans have read. */
+data class MailAccount(
+    val email: String, val host: String, val secret: String,
+    val validity: Long = 0, val lastUid: Long = 0, val scanned: Long = 0, val error: String = "",
+)
+
+/** An email with flights in it. [state]: "" suggested, "i" imported, "d" dismissed (the history: never suggested again). */
+data class MailHit(
+    val account: String, val id: String, val subject: String, val from: String, val to: String,
+    val sent: LocalDate, val text: String, val state: String = "",
+) {
+    val key get() = "$account|$id"
+    /** Parsed as of the day it arrived, so dates without a year land in the right one. */
+    val flights: List<Found> by lazy { Importer.parse(text, sent) }
+}
+
+/** Emails to suggest: not imported or dismissed, with at least one flight that isn't [saved] yet. Newest first. */
+fun suggest(hits: List<MailHit>, saved: (Found) -> Boolean): List<MailHit> =
+    hits.filter { h -> h.state.isEmpty() && h.flights.any { !saved(it) } }.sortedByDescending { it.sent }
+
+/** "UA 1000 SFO→PIT · Oct 3" for each flight. */
+fun MailHit.summary() = flights.joinToString(", ") { f ->
+    f.label + (if (f.from != null && f.to != null) " ${f.from}→${f.to}" else "") + (f.date?.let { " · " + dayLabel(it) } ?: "")
+}
+
+/**
+ * Scans linked mailboxes for flight confirmations, entirely from the phone: it signs in to the mail server directly
+ * with an app password, searches on the server, and downloads only the matching emails' text.
+ */
+object Mail {
+    const val GMAIL = "imap.gmail.com"
+    val accounts = mutableStateListOf<MailAccount>()
+    val hits = mutableStateListOf<MailHit>()
+    /** Keys ticked on the found-emails page; outlives that page while you step through the reviews. */
+    val picked = mutableStateListOf<String>()
+    var progress by mutableStateOf<String?>(null)
+    private lateinit var file: File
+    private val lock = Mutex()
+
+    fun init(ctx: Context) {
+        file = File(ctx.filesDir, "mail.json")
+        if (!file.exists()) return
+        runCatching {
+            val j = JSONObject(file.readText())
+            j.optJSONArray("accounts")?.let { a ->
+                for (i in 0 until a.length()) a.getJSONObject(i).run {
+                    accounts += MailAccount(
+                        getString("email"), optString("host", GMAIL), getString("secret"),
+                        optLong("validity"), optLong("lastUid"), optLong("scanned"), optString("error"),
+                    )
+                }
+            }
+            j.optJSONArray("hits")?.let { a ->
+                for (i in 0 until a.length()) a.getJSONObject(i).run {
+                    hits += MailHit(
+                        getString("account"), getString("id"), optString("subject"), optString("from"), optString("to"),
+                        LocalDate.parse(getString("sent")), optString("text"), optString("state"),
+                    )
+                }
+            }
+        }
+    }
+
+    /** Main thread only. Kept out of the flights backup: passwords and email text never leave the phone. */
+    private fun save() = synchronized(this) {
+        val j = JSONObject()
+            .put("accounts", JSONArray(accounts.map {
+                JSONObject().put("email", it.email).put("host", it.host).put("secret", it.secret).put("validity", it.validity)
+                    .put("lastUid", it.lastUid).put("scanned", it.scanned).put("error", it.error)
+            }))
+            .put("hits", JSONArray(hits.map {
+                JSONObject().put("account", it.account).put("id", it.id).put("subject", it.subject).put("from", it.from)
+                    .put("to", it.to).put("sent", it.sent.toString()).put("text", it.text).put("state", it.state)
+            }))
+        val tmp = File(file.path + ".tmp")
+        tmp.writeText(j.toString())
+        tmp.renameTo(file)
+    }
+
+    val suggestions get() = suggest(hits) { existingFor(it) != null }
+
+    fun add(ctx: Context, email: String, host: String, password: String) {
+        accounts.removeAll { it.email == email }
+        accounts += MailAccount(email, host, Vault.encrypt(password.replace(" ", "")))
+        save(); schedule(ctx)
+    }
+
+    /** Forgets the account and its password. Its import/dismiss history stays, so a re-link doesn't re-suggest. */
+    fun remove(ctx: Context, email: String) {
+        accounts.removeAll { it.email == email }
+        hits.removeAll { it.account == email && it.state.isEmpty() }
+        picked.removeAll { it.startsWith("$email|") }
+        save(); schedule(ctx)
+    }
+
+    private fun put(a: MailAccount) {
+        val i = accounts.indexOfFirst { it.email == a.email }
+        if (i >= 0) { accounts[i] = a; save() } // removed mid-scan: drop it
+    }
+
+    fun mark(keys: Collection<String>, state: String) {
+        hits.replaceAll { if (it.key in keys) it.copy(state = state, text = if (state == "i") "" else it.text) else it }
+        picked.removeAll(keys)
+        save()
+    }
+
+    fun restoreDismissed() { hits.replaceAll { if (it.state == "d") it.copy(state = "") else it }; save() }
+
+    /** Signs in and opens the mailbox; null when it works, else what went wrong. */
+    suspend fun test(email: String, host: String, password: String): String? = withContext(Dispatchers.IO) {
+        runCatching { Imap.connect(host).use { it.login(email, password.replace(" ", "")); it.examine("INBOX") }; null }.getOrElse(::friendly)
+    }
+
+    suspend fun test(a: MailAccount): String? = runCatching { Vault.decrypt(a.secret) }.fold({ test(a.email, a.host, it) }, ::friendly)
+
+    private fun friendly(e: Throwable): String {
+        val m = e.message.orEmpty()
+        return when {
+            m.contains("AUTHENTICATIONFAILED", true) || m.contains("Invalid credentials", true) -> "Wrong email or app password"
+            m.contains("Application-specific password", true) -> "Needs an app password, not your Google password"
+            e is java.net.UnknownHostException -> "No connection"
+            e is java.net.SocketTimeoutException -> "The server didn't answer"
+            e is javax.crypto.AEADBadTagException || e is java.security.GeneralSecurityException -> "Password unreadable; remove and add the account again"
+            else -> m.ifEmpty { e.javaClass.simpleName }
+        }
+    }
+
+    /** Scans every account for new mail. Returns how many new flights were found. */
+    suspend fun scanAll(ctx: Context): Int = lock.withLock {
+        var n = 0
+        for (a in withContext(Dispatchers.Main) { accounts.toList() }) {
+            n += runCatching { scan(ctx, a) }.getOrElse { e ->
+                withContext(Dispatchers.Main) {
+                    accounts.firstOrNull { it.email == a.email }?.let { put(it.copy(error = friendly(e), scanned = System.currentTimeMillis())) }
+                }
+                0
+            }
+        }
+        progress = null
+        n
+    }
+
+    private suspend fun scan(ctx: Context, account: MailAccount): Int = withContext(Dispatchers.IO) {
+        var a = account
+        var added = 0
+        val known = withContext(Dispatchers.Main) { hits.map { it.key }.toHashSet() }
+        progress = "Signing in to ${a.email}…"
+        Imap.connect(a.host).use { im ->
+            im.login(a.email, Vault.decrypt(a.secret))
+            val gmail = "X-GM-EXT-1" in im.caps()
+            val box = im.examine(if (gmail) im.allMail() else "INBOX")
+            val start = MailQuery.start(box.validity, a.validity, a.lastUid)
+            progress = "Searching ${a.email}…"
+            val uids = MailQuery.fresh(im.search(if (gmail) MailQuery.gmail(start) else MailQuery.standard(start)), start)
+            var done = 0
+            for (chunk in uids.chunked(20)) {
+                val heads = im.fetch(chunk.joinToString(","), "INTERNALDATE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT MESSAGE-ID)]")
+                val found = chunk.mapNotNull { uid ->
+                    progress = "Reading ${a.email}: ${++done} of ${uids.size}"
+                    heads[uid]?.let { read(ctx, im, a.email, box.validity, uid, it, known) }
+                }
+                // Progress is saved per batch, so an interrupted first scan picks up where it stopped.
+                a = a.copy(validity = box.validity, lastUid = chunk.last())
+                withContext(Dispatchers.Main) {
+                    hits += found
+                    added += suggest(found) { existingFor(it) != null }.sumOf { it.flights.size }
+                    put(a)
+                }
+            }
+            a = a.copy(
+                validity = box.validity, lastUid = maxOf(uids.lastOrNull() ?: (start - 1), box.uidNext - 1),
+                scanned = System.currentTimeMillis(), error = "",
+            )
+            withContext(Dispatchers.Main) { put(a) }
+        }
+        added
+    }
+
+    /** Reads one email's text (plain, else HTML, else PDF attachment) and keeps it if flights are in it. */
+    private suspend fun read(
+        ctx: Context, im: Imap, account: String, validity: Long, uid: Long, kv: Map<String, Any?>, known: MutableSet<String>,
+    ): MailHit? {
+        val h = Mime.headers(kv.entries.firstOrNull { it.key.startsWith("BODY[HEADER") }?.value as? String ?: "")
+        val id = h["message-id"]?.trim()?.trim('<', '>')?.ifEmpty { null } ?: "uid:$validity:$uid"
+        if (!known.add("$account|$id")) return null // already suggested, imported or dismissed
+        val sent = Mime.internalDate(kv["INTERNALDATE"] as? String) ?: LocalDate.now()
+        for (p in Mime.readable(Mime.parts(kv["BODYSTRUCTURE"] as? List<*> ?: return null))) {
+            val raw = im.fetch("$uid", "BODY.PEEK[${p.section}]")[uid]?.entries?.firstOrNull { it.key.startsWith("BODY[") }?.value as? String ?: continue
+            val text = when (p.type) {
+                "text/plain" -> Mime.text(raw, p.encoding, p.charset)
+                "text/html" -> Mime.html(Mime.text(raw, p.encoding, p.charset))
+                else -> pdfText(ctx, Mime.bytes(raw, p.encoding))
+            }
+            if (Importer.parse(text, sent).isEmpty()) continue
+            val to = h["to"]?.let(Mime::address)?.takeIf { '@' in it } ?: account
+            return MailHit(account, id, h["subject"].orEmpty(), Mime.sender(h["from"].orEmpty()), to, sent, text.take(100_000))
+        }
+        return null
+    }
+
+    private suspend fun pdfText(ctx: Context, bytes: ByteArray): String {
+        val f = File(ctx.cacheDir, "mail.pdf")
+        return try {
+            f.writeBytes(bytes)
+            runCatching { Importer.text(ctx, Uri.fromFile(f)) }.getOrDefault("")
+        } finally { f.delete() }
+    }
+
+    /**
+     * Opens the first of [keys] in the import review. Adding it marks it imported and moves on to the next; Cancel
+     * stops, leaving the rest ticked. Ones whose flights got saved along the way are skipped.
+     */
+    fun review(keys: List<String>) {
+        val queue = keys.mapNotNull { k -> suggestions.firstOrNull { it.key == k } }
+        val h = queue.firstOrNull() ?: return
+        Imports.clear()
+        Imports.found = h.flights
+        Imports.traveler = Importer.traveler(h.text)
+        Imports.work = Importer.isWork(h.text)
+        Imports.recipient = h.to
+        Imports.then = { added -> if (added) { mark(listOf(h.key), "i"); review(queue.drop(1).map { it.key }) } }
+        Nav.push(Screen.Add(friend = false))
+    }
+
+    /** Auto-scan every [Prefs] "mailWeeks" weeks (0 = manual only), over any network, while there are accounts. */
+    fun schedule(ctx: Context) {
+        val wm = WorkManager.getInstance(ctx)
+        val weeks = Prefs["mailWeeks"].toIntOrNull() ?: 0
+        if (weeks == 0 || accounts.isEmpty()) { wm.cancelUniqueWork("mail"); return }
+        val req = PeriodicWorkRequestBuilder<MailWorker>(weeks * 7L, TimeUnit.DAYS)
+            .setConstraints(Constraints(requiredNetworkType = NetworkType.CONNECTED)).build()
+        wm.enqueueUniquePeriodicWork("mail", ExistingPeriodicWorkPolicy.UPDATE, req)
+    }
+
+    /** Runs in WorkManager so a long first scan finishes even if you leave the app. */
+    fun scanNow(ctx: Context) {
+        progress = "Starting…"
+        val req = OneTimeWorkRequestBuilder<MailWorker>().setInputData(workDataOf("notify" to false))
+            .setConstraints(Constraints(requiredNetworkType = NetworkType.CONNECTED)).build()
+        WorkManager.getInstance(ctx).enqueueUniqueWork("mailNow", ExistingWorkPolicy.KEEP, req)
+    }
+
+    fun notify(ctx: Context, flights: Int) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel("mail", "Flights found in email", NotificationManager.IMPORTANCE_DEFAULT))
+        val open = PendingIntent.getActivity(
+            ctx, 7, Intent(ctx, MainActivity::class.java).putExtra("mail", true).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        nm.notify(
+            "mail".hashCode(),
+            Notification.Builder(ctx, "mail").setSmallIcon(R.drawable.ic_plane)
+                .setContentTitle("$flights flight${if (flights == 1) "" else "s"} found in your email")
+                .setContentText("Tap to choose which to import").setContentIntent(open).setAutoCancel(true).build(),
+        )
+    }
+}
+
+class MailWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        val n = Mail.scanAll(applicationContext)
+        if (n > 0 && inputData.getBoolean("notify", true)) Mail.notify(applicationContext, n)
+        return Result.success()
+    }
+}
+
+/** App passwords, encrypted with an AES-GCM key that lives in (and never leaves) the Android Keystore. */
+private object Vault {
+    private const val ALIAS = "mail"
+
+    private fun key(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+            init(
+                KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build(),
+            )
+        }.generateKey()
+    }
+
+    /** IV (12 bytes) + ciphertext, base64. */
+    fun encrypt(s: String): String {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, key())
+        return Base64.getEncoder().encodeToString(c.iv + c.doFinal(s.toByteArray()))
+    }
+
+    fun decrypt(s: String): String {
+        val b = Base64.getDecoder().decode(s)
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, b, 0, 12))
+        return String(c.doFinal(b, 12, b.size - 12))
+    }
+}
