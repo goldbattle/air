@@ -268,6 +268,10 @@ private fun BackupTab() {
         }
         Hairline(50.dp)
         Cell("Find flights in email", subtitle = "Scan Gmail for confirmations", icon = Icons.Filled.Email, chevron = true) { Nav.push(Screen.MailAccounts) }
+        Hairline()
+        Cell("Print to Air", subtitle = "Turn on Air here once, then print emails to \"Save to Air\"", icon = Icons.Filled.Print, chevron = true) {
+            ctx.startActivity(Intent(Settings.ACTION_PRINT_SETTINGS))
+        }
     }
     Footnote(
         "Cloud backup is off, so export now and then and keep the file somewhere safe. " +

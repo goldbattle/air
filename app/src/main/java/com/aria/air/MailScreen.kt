@@ -2,6 +2,7 @@ package com.aria.air
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -39,20 +40,73 @@ fun MailScreen() {
     val ok = '@' in email && pass.isNotBlank() && host.isNotBlank()
     fun browse(url: String) = runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
 
-    Page("Email", onBack = { Nav.pop() }, backLabel = "Settings") {
+    if (adding) {
+        // Linking is its own page: three steps top to bottom, one button at the end.
+        fun back() { if (Mail.accounts.isEmpty()) Nav.pop() else { adding = false; test = null } }
+        BackHandler { back() }
+        Page("Add Account", onBack = ::back, backLabel = if (Mail.accounts.isEmpty()) "Settings" else "Email") {
+            item("steps") {
+                Footnote(
+                    "Air reads booking emails straight from Gmail on this phone with an app password. " +
+                        "No Google sign-in screen or cloud service is involved.",
+                )
+                SectionHeader("1. Turn on 2-Step Verification")
+                Group {
+                    Cell("Open Google account security", icon = Icons.Filled.Security, chevron = true) { browse("https://myaccount.google.com/signinoptions/twosv") }
+                }
+                Footnote("Skip this if it's already on. Google only offers app passwords with it.")
+                SectionHeader("2. Create an app password")
+                Group {
+                    Cell("Open App passwords", icon = Icons.Filled.Key, chevron = true) { browse("https://myaccount.google.com/apppasswords") }
+                }
+                Footnote("Name it \"Air\" and tap Create. Copy the 16-letter password Google shows.")
+                SectionHeader("3. Enter it here")
+                Group {
+                    FieldCell("Gmail address", email, "you@gmail.com") { email = it.trim().lowercase(); test = null }
+                    Hairline()
+                    FieldCell("App password", pass, "16 letters", secret = true) { pass = it; test = null }
+                    if (host != Mail.GMAIL) {
+                        Hairline()
+                        FieldCell("IMAP server", host, "imap.example.com") { host = it.trim().lowercase(); test = null }
+                    }
+                }
+                test?.let { Footnote(it) }
+                Spacer(Modifier.height(12.dp))
+                Button(if (testing) "Checking…" else "Link account", Modifier.fillMaxWidth(), enabled = ok && !testing) {
+                    testing = true
+                    App.scope.launch {
+                        val err = Mail.test(email, host, pass)
+                        testing = false
+                        if (err != null) { test = err; return@launch }
+                        Mail.add(ctx, email, host, pass)
+                        Toast.makeText(ctx, "Linked $email. Tap Scan now to search it.", Toast.LENGTH_LONG).show()
+                        email = ""; pass = ""; host = Mail.GMAIL; test = null; adding = false
+                    }
+                }
+                Footnote(
+                    "The password is encrypted on this phone and never backed up or exported. To revoke it later, delete it " +
+                        "under App passwords.",
+                )
+                if (host == Mail.GMAIL) Text(
+                    "Not Gmail? Use another IMAP server", color = C.blue, fontSize = 15.sp,
+                    modifier = Modifier.clickable { host = "" }.padding(16.dp),
+                )
+            }
+        }
+    } else Page("Email", onBack = { Nav.pop() }, backLabel = "Settings") {
         item("found") {
             Group {
                 Cell("Flights found in email", "${Mail.suggestions.size}", icon = Icons.Filled.Inbox, chevron = true) { Nav.push(Screen.MailFound) }
                 Hairline(50.dp)
                 val busy = Mail.progress != null
                 Cell(Mail.progress ?: "Scan now", icon = Icons.Filled.Refresh, color = if (busy) C.secondary else C.blue) {
-                    if (!busy && Mail.accounts.isNotEmpty()) Mail.scanNow(ctx)
+                    if (!busy) Mail.scanNow(ctx)
                 }
             }
             Footnote(
-                "Air searches your mailbox on the mail server for airline and travel emails and downloads only those, " +
-                    "straight to this phone. Read-only: nothing is marked read, moved or deleted. The first scan covers all " +
-                    "your mail, later ones only what's new.",
+                "Air searches your mailbox for airline and travel emails and downloads only those, straight to this " +
+                    "phone. Nothing is marked read, moved or deleted. The first scan covers all your mail, later ones only " +
+                    "what's new.",
             )
         }
 
@@ -66,39 +120,9 @@ fun MailScreen() {
                         subtitle = a.error.ifEmpty { if (a.scanned > 0) "Scanned ${ago(Instant.ofEpochMilli(a.scanned))}" else "Not scanned yet" },
                     ) { open = a; test = null }
                 }
-                if (Mail.accounts.isNotEmpty()) Hairline(50.dp)
+                Hairline(50.dp)
                 Cell("Add account", icon = Icons.Filled.Add, color = C.blue) { adding = true }
             }
-        }
-
-        if (adding) item("add") {
-            SectionHeader("Link an account")
-            Group {
-                FieldCell("Email", email, "you@gmail.com") { email = it.trim().lowercase(); test = null }
-                Hairline()
-                FieldCell("App password", pass, "16 letters", secret = true) { pass = it; test = null }
-                Hairline()
-                FieldCell("Server", host, Mail.GMAIL) { host = it.trim().lowercase(); test = null }
-                Hairline()
-                Cell(if (testing) "Testing…" else "Test connection", test, color = if (ok) C.blue else C.tertiary) {
-                    if (!ok || testing) return@Cell
-                    testing = true
-                    App.scope.launch { test = Mail.test(email, host, pass) ?: "Works"; testing = false }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Button(if (testing) "Signing in…" else "Link account", Modifier.fillMaxWidth(), enabled = ok && !testing) {
-                testing = true
-                App.scope.launch {
-                    val err = Mail.test(email, host, pass)
-                    testing = false
-                    if (err != null) { test = err; return@launch }
-                    Mail.add(ctx, email, host, pass)
-                    Toast.makeText(ctx, "Linked $email. Tap Scan now to search it.", Toast.LENGTH_LONG).show()
-                    email = ""; pass = ""; host = Mail.GMAIL; test = null; adding = false
-                }
-            }
-            Footnote("Other providers: their IMAP server (port 993, SSL) and an app password.")
         }
 
         item("schedule") {
@@ -126,34 +150,7 @@ fun MailScreen() {
                     Cell("Suggest dismissed emails again", color = C.blue) { Mail.restoreDismissed() }
                 }
             }
-            Footnote("Emails you import or dismiss are remembered here and never suggested again.")
-        }
-
-        item("guide") {
-            SectionHeader("Link Gmail with an app password")
-            Group {
-                Text(
-                    "1.  Turn on 2-Step Verification for your Google account. App passwords need it.\n" +
-                        "2.  Open App passwords, type a name such as \"Air\" and tap Create.\n" +
-                        "3.  Google shows a 16-letter password. Copy it, then paste it above with your Gmail address " +
-                        "(spaces don't matter). Tap Test connection, then Link account.\n" +
-                        "4.  Repeat for each Gmail address you want scanned.",
-                    fontSize = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(16.dp),
-                )
-                Hairline(50.dp)
-                Cell("2-Step Verification", icon = Icons.Filled.Security, chevron = true) { browse("https://myaccount.google.com/signinoptions/twosv") }
-                Hairline(50.dp)
-                Cell("App passwords", icon = Icons.Filled.Key, chevron = true) { browse("https://myaccount.google.com/apppasswords") }
-            }
-            Footnote(
-                "No Google Cloud project or sign-in screen: Air logs in to imap.gmail.com directly from this phone. The app " +
-                    "password is encrypted with a key kept in the Android Keystore, and is never in backups or exports.",
-            )
-            Footnote(
-                "To revoke: delete it under App passwords (changing your Google password revokes all of them too), and " +
-                    "remove the account here, which deletes the copy on this phone. Work or school accounts may have app " +
-                    "passwords turned off by an admin.",
-            )
+            Footnote("Emails you import or dismiss are remembered and never suggested again.")
         }
     }
 

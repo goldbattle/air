@@ -4,3 +4,4 @@
 
 # ML Kit (OCR) registers its components by reflection; without these constructors text recognition fails in release.
 -keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
+-keepnames class * extends java.lang.Throwable

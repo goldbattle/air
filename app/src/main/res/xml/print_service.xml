@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Save to Air" printer: no settings or add-printer screens, it's always there. -->
+<print-service xmlns:android="http://schemas.android.com/apk/res/android" />

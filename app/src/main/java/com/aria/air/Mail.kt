@@ -162,7 +162,7 @@ object Mail {
             e is java.net.UnknownHostException -> "No connection"
             e is java.net.SocketTimeoutException -> "The server didn't answer"
             e is javax.crypto.AEADBadTagException || e is java.security.GeneralSecurityException -> "Password unreadable; remove and add the account again"
-            else -> m.ifEmpty { e.javaClass.simpleName }
+            else -> "Couldn't connect: ${e.javaClass.name}${if (m.isNotEmpty()) " ($m)" else ""}".also { android.util.Log.w("Air", "mail", e) }
         }
     }
 
@@ -257,8 +257,8 @@ object Mail {
         Imports.clear()
         Imports.found = h.flights
         Imports.traveler = Importer.traveler(h.text)
-        Imports.work = Importer.isWork(h.text)
-        Imports.recipient = h.to
+        Imports.to = h.to
+        Imports.work = Importer.isWork(h.text, h.to, Prefs::workFor)
         Imports.then = { added -> if (added) { mark(listOf(h.key), "i"); review(queue.drop(1).map { it.key }) } }
         Nav.push(Screen.Add(friend = false))
     }

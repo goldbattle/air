@@ -11,3 +11,5 @@ local.properties
 .aria_uploads/
 __pycache__/
 /local/
+.claude/worktrees/
+*.stackdump

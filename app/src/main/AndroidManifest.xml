@@ -60,6 +60,19 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- "Save to Air" printer: print a confirmation email from Gmail to import it. Turned on in system print settings. -->
+        <service
+            android:name=".PrintToAir"
+            android:exported="true"
+            android:label="Air"
+            android:permission="android.permission.BIND_PRINT_SERVICE">
+            <intent-filter>
+                <action android:name="android.printservice.PrintService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.printservice"
+                android:resource="@xml/print_service" />
+        </service>
         <!-- ML Kit runs OCR on-device but logs anonymous usage to Google via this backend. Removing it drops
              those logs instead of uploading them. -->
         <service
