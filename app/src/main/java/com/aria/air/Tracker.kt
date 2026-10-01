@@ -28,11 +28,8 @@ import kotlin.math.roundToInt
 // countdown ticks on its own regardless. Upgrade path: a foreground service while airborne.
 class TrackWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
-        val now = Instant.now()
-        val due = withContext(Dispatchers.Main) { Store.flights.toList() }.filter {
-            // All my upcoming flights (far-out ones only hit the network once a day, see Api.refresh); friends' near theirs.
-            (it.upcoming || it.maybeLive) && (it.mine || it.depGuess < now.plus(Duration.ofHours(6)))
-        }
+        val now = Instant.now(clock)
+        val due = withContext(Dispatchers.Main) { Store.flights.toList() }.filter { tracked(it, now) }
         val online = isOnline(applicationContext)
         for (f in due) {
             // Offline (say, in the air without Wi-Fi): skip the network and just redraw from times and estimates.
@@ -56,6 +53,9 @@ class TrackWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
     }
 
     companion object {
+        /** All my upcoming flights (far-out ones only hit the network once a day, see Api.refresh); friends' near theirs. */
+        fun tracked(f: Flight, now: Instant) = (f.upcoming || f.maybeLive) && (f.mine || f.depGuess < now.plus(Duration.ofHours(6)))
+
         /** Call after flights change, and from the worker itself. */
         fun schedule(ctx: Context, fromWorker: Boolean = false) {
             val wm = WorkManager.getInstance(ctx)
@@ -65,7 +65,7 @@ class TrackWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             if (upcoming.isEmpty()) {
                 wm.cancelUniqueWork("track"); return
             }
-            val delay = if (!fromWorker) 0L else nextCheckMinutes(upcoming, Instant.now())
+            val delay = if (!fromWorker) 0L else nextCheckMinutes(upcoming, Instant.now(clock))
             // No network constraint: offline runs still move the progress bar and widget along.
             val req = OneTimeWorkRequestBuilder<TrackWorker>()
                 .setInitialDelay(delay, TimeUnit.MINUTES)
@@ -132,7 +132,7 @@ object Notify {
      * Whether a flight gets the ongoing notification now: my flights from [Prefs.liveLeadHours] before departure (once
      * the time is known), friends' from 3 hours before, both through the air and until an hour after landing.
      */
-    fun wantsLive(f: Flight, now: Instant = Instant.now()): Boolean {
+    fun wantsLive(f: Flight, now: Instant = Instant.now(clock)): Boolean {
         if (!liveEnabled(f) || f.cancelled) return false
         val phase = f.phase(now)
         if (phase == Phase.InFlight || phase == Phase.Arrival) return true
@@ -151,7 +151,7 @@ object Notify {
     fun live(ctx: Context, f: Flight) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val id = f.id.hashCode()
-        val now = Instant.now()
+        val now = Instant.now(clock)
         if (!wantsLive(f, now)) {
             nm.cancel(id); return
         }
@@ -246,12 +246,16 @@ object Notify {
     }
 
     /** Notifies what changed between [old] and [new], each event once. Returns the updated "already alerted" list. */
-    fun events(ctx: Context, old: Flight, new: Flight): String {
+    fun events(ctx: Context, old: Flight, new: Flight): String =
+        events(old, new) { key, title, text -> if (alertsEnabled(new)) alert(ctx, new, key, title, text) }
+
+    /** [events] without Android: [send] gets each new alert's key, title and text. */
+    fun events(old: Flight, new: Flight, send: (key: String, title: String, text: String) -> Unit): String {
         val done = old.alerted.split(',').filter { it.isNotEmpty() }.toMutableSet()
         fun once(key: String, title: String, text: String) {
             if (key in done) return
             done += key
-            if (alertsEnabled(new)) alert(ctx, new, key, title, text)
+            send(key, title, text)
         }
         val name = "${who(new)}${new.label}"
         if (new.cancelled) once("cancelled", "$name cancelled", "${new.from} → ${new.to} on ${dayLabel(new.date)}")
@@ -295,27 +299,32 @@ object Notify {
     /** For my own flights, once each: "check in now" 24 h before, and "leaves in 3 hours" (Settings). */
     fun reminders(ctx: Context) {
         if (!Prefs.flag("alertsMine")) return
-        val now = Instant.now()
+        val now = Instant.now(clock)
         val h = Prefs.reminderHours
         for (f in Store.flights.filter { it.mine && it.upcoming && !it.cancelled }) {
-            val dep = f.dep ?: continue
-            if (dep <= now) continue
-            val left = Duration.between(now, dep)
-            val sent = f.alerted.split(',').filter { it.isNotEmpty() }.toMutableSet()
-            if (Prefs.flag("checkinReminder") && left <= Duration.ofHours(24) && "checkin" !in sent) {
-                sent += "checkin"
-                alert(ctx, f, "checkin", "Check in for ${f.label} to ${f.dest?.city ?: f.to}",
-                    "Check-in is open. Departs ${dayLabel(f.date)} at ${time(dep, f.fromTz)} from ${f.from}" +
-                        (if (f.booking.isNotEmpty()) " · Conf. ${f.booking}" else ""))
-            }
-            if (h > 0 && left <= Duration.ofHours(h.toLong()) && "reminder" !in sent) {
-                sent += "reminder"
-                alert(ctx, f, "reminder", "${f.label} to ${f.dest?.city ?: f.to} leaves in ${span(left)}",
-                    "Boarding ${time(dep.minus(f.boardingLead), f.fromTz)} at ${f.from}" + (if (f.depGate.isNotEmpty()) ", gate ${f.depGate}" else ""))
-            }
-            val joined = sent.joinToString(",")
-            if (joined != f.alerted) Store.upsert(f.copy(alerted = joined))
+            val due = dueReminders(f, now, h, Prefs.flag("checkinReminder"))
+            due.forEach { (key, title, text) -> alert(ctx, f, key, title, text) }
+            if (due.isNotEmpty()) Store.upsert(f.copy(alerted = (f.alerted.split(',').filter { it.isNotEmpty() } + due.map { it.first }).joinToString(",")))
         }
+    }
+
+    /** The reminders [f] is due and hasn't had yet, as (key, title, text): check-in 24 h out, and [hours] before. */
+    fun dueReminders(f: Flight, now: Instant, hours: Int, checkin: Boolean): List<Triple<String, String, String>> {
+        val dep = f.dep ?: return emptyList()
+        if (dep <= now) return emptyList()
+        val left = Duration.between(now, dep)
+        val sent = f.alerted.split(',').filter { it.isNotEmpty() }.toSet()
+        return listOfNotNull(
+            if (checkin && left <= Duration.ofHours(24) && "checkin" !in sent) Triple(
+                "checkin", "Check in for ${f.label} to ${f.dest?.city ?: f.to}",
+                "Check-in is open. Departs ${dayLabel(f.date)} at ${time(dep, f.fromTz)} from ${f.from}" +
+                    (if (f.booking.isNotEmpty()) " · Conf. ${f.booking}" else ""),
+            ) else null,
+            if (hours > 0 && left <= Duration.ofHours(hours.toLong()) && "reminder" !in sent) Triple(
+                "reminder", "${f.label} to ${f.dest?.city ?: f.to} leaves in ${span(left)}",
+                "Boarding ${time(dep.minus(f.boardingLead), f.fromTz)} at ${f.from}" + (if (f.depGate.isNotEmpty()) ", gate ${f.depGate}" else ""),
+            ) else null,
+        )
     }
 }
 

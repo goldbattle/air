@@ -146,8 +146,8 @@ def shot(name: str) -> None:
 
 # Rough UTC offsets for the demo airports (fall, with daylight saving) to turn local times into instants.
 OFFSET = {
-    "SFO": -7, "SJC": -7, "LAX": -7, "SAN": -7, "BUR": -7, "SEA": -7, "DEN": -6, "MDW": -5, "ORD": -5,
-    "PIT": -4, "JFK": -4, "BOS": -4, "DTW": -4, "PWM": -4, "LHR": 1,
+    "SFO": -7, "OAK": -7, "LAX": -7, "LAS": -7, "SEA": -7, "DEN": -6, "MDW": -5, "ORD": -5,
+    "JFK": -4, "BOS": -4, "ATL": -4, "LHR": 1,
 }
 ICAO_TO_IATA = {"UAL": "UA", "DAL": "DL", "AAL": "AA", "SWA": "WN", "ASA": "AS", "JBU": "B6"}
 
@@ -214,27 +214,27 @@ def demo_backup() -> tuple[dict, list[str]]:
     if not live:  # offline fallback: a flight that's two hours into five, by the clock
         now = dt.datetime.now()
         dep, arr = (now - dt.timedelta(hours=2)).strftime("%H:%M"), (now + dt.timedelta(hours=3)).strftime("%H:%M")
-        flights.append(flight("UA", 1000, today, "SFO", "PIT", dep, arr))
+        flights.append(flight("UA", 1000, today, "SFO", "BOS", dep, arr))
         live_labels.append("UA 1000")
     flights += [
         # Mine, upcoming
-        flight("UA", 2000, d(1), "PIT", "SFO", "07:00", "09:24", seat="21C", booking="DEMO42"),
-        flight("DL", 400, d(18), "DTW", "PWM", "10:25", "12:22", booking="DEMO77"),
+        flight("UA", 1234, d(1), "BOS", "SFO", "07:00", "10:35", seat="21C", booking="DEMO42"),
+        flight("DL", 1105, d(18), "ATL", "BOS", "09:15", "11:58", booking="DEMO77"),
         # Mine, past (a year and a half of trips, two of them for work)
-        flight("UA", 900, d(-60), "LHR", "SFO", "10:35", "13:35", seat="31A"),
-        flight("UA", 948, d(-70), "SFO", "LHR", "16:45", "11:10", seat="31C"),
-        flight("WN", 3489, d(-80), "SJC", "SAN", "06:30", "08:00"),
-        flight("WN", 3542, d(-80), "SAN", "SJC", "21:00", "22:30"),
-        flight("UA", 1003, d(-150), "SFO", "DEN", "05:07", "08:46"),
-        flight("UA", 2681, d(-147), "DEN", "SFO", "19:00", "20:48"),
-        flight("WN", 2300, d(-300), "SJC", "BUR", "18:35", "19:45", work=True, booking="WORK01"),
-        flight("WN", 1700, d(-298), "BUR", "SJC", "20:20", "21:35", work=True, booking="WORK01"),
-        flight("DL", 960, d(-400), "LAX", "JFK", "22:59", "07:25"),
-        flight("DL", 961, d(-395), "JFK", "LAX", "08:00", "11:30"),
-        flight("AS", 8, d(-500), "SFO", "BOS", "09:30", "18:00"),
+        flight("UA", 951, d(-60), "LHR", "SFO", "12:35", "15:40", seat="31A"),
+        flight("UA", 950, d(-70), "SFO", "LHR", "17:00", "11:30", seat="31C"),
+        flight("WN", 500, d(-80), "OAK", "LAS", "07:15", "08:45"),
+        flight("WN", 501, d(-80), "LAS", "OAK", "20:30", "22:00"),
+        flight("UA", 300, d(-150), "SFO", "ORD", "06:00", "12:15"),
+        flight("UA", 301, d(-147), "ORD", "SFO", "17:30", "20:10"),
+        flight("WN", 1200, d(-300), "OAK", "LAS", "18:35", "20:05", work=True, booking="WORK01"),
+        flight("WN", 1201, d(-298), "LAS", "OAK", "20:20", "21:50", work=True, booking="WORK01"),
+        flight("DL", 2100, d(-400), "LAX", "JFK", "22:30", "06:55"),
+        flight("DL", 2101, d(-395), "JFK", "LAX", "08:00", "11:25"),
+        flight("AS", 10, d(-500), "SEA", "BOS", "09:30", "17:45"),
         # Friends
-        flight("UA", 700, d(5), "SFO", "PWM", "08:30", "17:17", friend="Jordan Park", seat="22C"),
-        flight("WN", 1546, d(-40), "MDW", "SFO", "10:05", "12:35", friend="Jordan Park"),
+        flight("UA", 455, d(5), "SFO", "BOS", "07:15", "15:40", friend="Jordan Park", seat="22C"),
+        flight("WN", 2200, d(-40), "MDW", "DEN", "10:05", "11:35", friend="Jordan Park"),
     ]
     return {"app": "air", "version": 1, "name": "Alex Rivera", "flights": flights}, live_labels
 
@@ -331,11 +331,11 @@ def tour(live_labels: list[str]) -> None:
         "Your trip confirmation: DEMO99\n"
         "Passenger: ALEX RIVERA\n"
         f"{fly.strftime('%a, %b %d, %Y')}\n"
-        "UA 700  San Francisco (SFO) to Portland (PWM)\n"
-        "Departs 8:30 AM  Arrives 5:17 PM  Seat 22C\n"
+        "UA 700  San Francisco (SFO) to Boston (BOS)\n"
+        "Departs 8:30 AM  Arrives 4:55 PM  Seat 22C\n"
         f"{(fly + dt.timedelta(days=8)).strftime('%a, %b %d, %Y')}\n"
-        "UA 2100  Portland (PWM) to San Francisco (SFO)\n"
-        "Departs 7:50 AM  Arrives 11:51 AM  Seat 14A\n"
+        "UA 701  Boston (BOS) to San Francisco (SFO)\n"
+        "Departs 7:50 AM  Arrives 11:20 AM  Seat 14A\n"
     )
 
     print("Flights")
@@ -351,7 +351,7 @@ def tour(live_labels: list[str]) -> None:
         shot("flight_details")
         back()
 
-    if tap_text("UA 2000"):
+    if tap_text("UA 1234"):
         time.sleep(3)
         shot("flight_pretravel")
         back()

@@ -65,4 +65,5 @@ dependencies {
     implementation(libs.mlkit.text)
     implementation(libs.androidx.glance)
     testImplementation(libs.junit)
+    testImplementation(libs.json)
 }

@@ -85,7 +85,7 @@ private fun widgetFlight(): Flight? {
 }
 
 /** What the big line says: the headline and the countdown under it. */
-private fun headline(f: Flight, now: Instant): Pair<String, String> {
+internal fun headline(f: Flight, now: Instant): Pair<String, String> {
     val dep = f.dep ?: f.depGuess
     val left = { t: Instant -> span(Duration.between(now, t).let { if (it.isNegative) Duration.ZERO else it }) }
     return when (f.phase(now)) {
@@ -253,7 +253,7 @@ private fun AirlineChip(f: Flight) = Box(
 }
 
 /** Gate/seat before the flight, speed/altitude in the air, gate/bags after. */
-private fun detailLine(f: Flight): String {
+internal fun detailLine(f: Flight): String {
     val l = f.live?.takeIf { f.isAirborne }
     if (l != null) return "${(l.speedKt * 1.15078).roundToInt()} mph · ${fmtInt(l.altFt)} ft"
     val landed = f.phase() >= Phase.Arrival

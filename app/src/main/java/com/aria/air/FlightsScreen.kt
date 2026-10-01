@@ -216,7 +216,7 @@ fun FlightCard(f: Flight, now: Instant, showFriend: Boolean = false, onClick: ()
     }
 }
 
-private fun middleLabel(f: Flight, phase: Phase, now: Instant): String = when (phase) {
+internal fun middleLabel(f: Flight, phase: Phase, now: Instant): String = when (phase) {
     Phase.PreTravel, Phase.Departure -> {
         val d = Duration.between(now, f.dep ?: f.depGuess)
         if (d.isNegative) "Boarding" else "in ${span(d)}"

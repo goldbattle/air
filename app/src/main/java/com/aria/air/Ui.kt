@@ -96,7 +96,7 @@ fun time(t: Instant?, zone: ZoneId): String = t?.atZone(zone)?.format(timeFmt) ?
 fun longDay(d: LocalDate): String = d.format(longDayFmt)
 
 fun dayLabel(d: LocalDate): String {
-    val today = LocalDate.now()
+    val today = localToday()
     return when {
         d == today -> "Today"
         d == today.plusDays(1) -> "Tomorrow"
@@ -117,7 +117,7 @@ fun span(d: Duration): String {
 }
 
 fun ago(t: Instant): String {
-    val s = Duration.between(t, Instant.now()).seconds
+    val s = Duration.between(t, Instant.now(clock)).seconds
     return when {
         s < 60 -> "just now"
         s < 3600 -> "${s / 60} min ago"

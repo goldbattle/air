@@ -542,7 +542,7 @@ private fun delayColor(delay: Long?): Color? = when {
     else -> C.green
 }
 
-private fun compass(deg: Double) = listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[(((deg % 360) + 382.5) / 45).toInt() % 8]
+internal fun compass(deg: Double) = listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[(((deg % 360) + 382.5) / 45).toInt() % 8]
 
 // ---------- Schedule card ----------
 

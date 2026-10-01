@@ -96,7 +96,7 @@ object Importer {
         Regex("(?i)(?:passenger|traveler|traveller)s?(?: name)?[ \\t]*:[ \\t]*($NAME)"),
         // United: a "Travelers" heading with the name on the next line.
         Regex("(?im)^[ \\t]*(?:travelers|travellers|passengers)[ \\t]*\\r?\\n[ \\t]*($NAME)[ \\t]*$"),
-        // Airline receipts: "Traveler Details" then "DOE/JANEQ" (LAST/FIRST).
+        // Airline receipts: "Traveler Details" then "DOE/JOHNQ" (LAST/FIRST).
         Regex("(?im)^[ \\t]*(?:traveler|traveller|passenger)s? (?:details|information)[ \\t]*\\r?\\n[ \\t]*([A-Za-z'-]+/[A-Za-z'-]+(?:[ \\t]+[A-Za-z]+)?)[ \\t]*$"),
         Regex("\\b([A-Z][a-z]+(?: [A-Z]\\.?)?(?: [A-Z][a-z]+)?)'s (?:Upcoming )?(?:Trip|Flight|Itinerary)"),
     )
@@ -165,10 +165,10 @@ object Importer {
     fun traveler(text: String): String? {
         val t = clean(text)
         var raw = travelerRes.firstNotNullOfOrNull { it.find(t)?.groupValues?.get(1)?.trim() } ?: return null
-        if ('/' in raw) raw = raw.substringAfter('/') + " " + raw.substringBefore('/') // "DOE/JANE" -> "JANE DOE"
+        if ('/' in raw) raw = raw.substringAfter('/') + " " + raw.substringBefore('/') // "DOE/JOHN" -> "JOHN DOE"
         val words = raw.split(Regex("[ \\t]+")).filter { it.isNotEmpty() && it.uppercase() !in setOf("MR", "MS", "MRS", "MISS", "DR") }
         if (words.isEmpty() || words.any { it.lowercase() in setOf("the", "and", "your", "this", "information", "details") }) return null
-        // "JANE DOE" -> "Jane Doe"
+        // "JOHN DOE" -> "John Doe"
         return words.joinToString(" ") { w -> if (w.length > 1 && w == w.uppercase()) w.lowercase().replaceFirstChar { it.uppercase() } else w }
     }
 
@@ -192,7 +192,7 @@ object Importer {
             val next = flights.getOrNull(i + 1)?.range?.first ?: minOf(t.length, start + 600)
             val prevEnd = flights.getOrNull(i - 1)?.range?.last?.plus(1) ?: 0
             val lastDate = allDates.lastOrNull { it.first in prevEnd until start }
-            // A date right after the number ("UA2000 Class: Economy / Fri, Oct 02", "WN3489 09JUL") is this flight's;
+            // A date right after the number ("UA1234 Class: Economy / Fri, Oct 02", "WN500 09JUL") is this flight's;
             // otherwise it's the nearest date before the number.
             val date = allDates.firstOrNull { it.first in m.range.last + 1 until minOf(next, start + 45) }?.second
                 ?: allDates.lastOrNull { it.first < start }?.second ?: allDates.firstOrNull { it.first in start until next }?.second

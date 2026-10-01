@@ -22,6 +22,8 @@ mlkit-text = { group = "com.google.mlkit", name = "text-recognition", version.re
 # Home screen widget in Compose style
 androidx-glance = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
 junit = { group = "junit", name = "junit", version = "4.13.2" }
+# Real org.json for JVM unit tests (android.jar only has stubs)
+json = { group = "org.json", name = "json", version = "20240303" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

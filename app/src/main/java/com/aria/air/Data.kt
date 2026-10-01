@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.Reader
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -21,6 +22,12 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+
+/** The wall clock behind every "now" in the flight logic; unit tests pin it. */
+var clock: Clock = Clock.systemUTC()
+
+/** Today in the phone's current time zone, by [clock]. */
+fun localToday(): LocalDate = LocalDate.ofInstant(Instant.now(clock), ZoneId.systemDefault())
 
 // ---------- Reference data (bundled, offline) ----------
 
@@ -195,7 +202,7 @@ data class Live(
 data class Flight(
     val id: String = UUID.randomUUID().toString(),
     val airline: String,              // IATA, "UA"
-    val number: String,               // "2000"
+    val number: String,               // "1234"
     val date: LocalDate,              // departure date, local to the origin
     val from: String, val to: String, // IATA airport codes
     val depSched: Instant? = null, val depEst: Instant? = null, val depActual: Instant? = null,
@@ -245,7 +252,7 @@ val Flight.hasTimes get() = depSched != null && arrSched != null
  */
 val Flight.hasLiveStatus: Boolean
     get() {
-        val now = Instant.now()
+        val now = Instant.now(clock)
         val d = dep ?: return false
         return depEst != null && updated != null && Duration.between(updated, now) < Duration.ofHours(6) &&
             now > d.minus(Duration.ofHours(24))
@@ -266,11 +273,11 @@ private val FRESH = Duration.ofMinutes(10)
 
 /** Re-checked every time, so a bad fix saved earlier (another plane on the same number) can't keep us "in the air". */
 val Flight.isAirborne: Boolean
-    get() = live != null && !live.onGround && live.speedKt >= 60 && Duration.between(live.at, Instant.now()) < FRESH &&
+    get() = live != null && !live.onGround && live.speedKt >= 60 && Duration.between(live.at, Instant.now(clock)) < FRESH &&
         Api.plausible(this, live)
 
 /** A status fetched in the last 30 minutes, from a service that would report takeoff, shows none yet. */
-fun Flight.airlineSaysNotDeparted(now: Instant = Instant.now()): Boolean {
+fun Flight.airlineSaysNotDeparted(now: Instant = Instant.now(clock)): Boolean {
     val planned = depEst ?: depSched ?: return false
     return updated != null && Duration.between(updated, now) < Duration.ofMinutes(30) && depActual == null &&
         now < planned.plus(Duration.ofMinutes(30))
@@ -280,7 +287,7 @@ fun Flight.airlineSaysNotDeparted(now: Instant = Instant.now()): Boolean {
 val Flight.tookOff: Instant?
     get() = depActual?.takeIf { a -> depSched == null || a > depSched.minus(Duration.ofHours(1)) }
 
-fun Flight.phase(now: Instant = Instant.now()): Phase = when {
+fun Flight.phase(now: Instant = Instant.now(clock)): Phase = when {
     cancelled -> if (now < depGuess.plus(Duration.ofHours(6))) Phase.Departure else Phase.Done
     arrActual != null -> if (now < arrActual.plus(Duration.ofHours(1))) Phase.Arrival else Phase.Done
     // The airline says it hasn't left yet (a fresh status with no takeoff time): believe it over any tracking data.
@@ -297,10 +304,10 @@ val Flight.upcoming get() = phase() != Phase.Done
 
 /** No schedule yet, but it's from yesterday or today and hasn't landed: worth asking where the plane is. */
 val Flight.maybeLive: Boolean
-    get() = !hasTimes && arrActual == null && !cancelled && date in LocalDate.now().minusDays(1)..LocalDate.now()
+    get() = !hasTimes && arrActual == null && !cancelled && date in localToday().minusDays(1)..localToday()
 
 /** 0..1 through the flight: by distance when the plane is broadcasting, else by clock. */
-fun Flight.progress(now: Instant = Instant.now()): Double {
+fun Flight.progress(now: Instant = Instant.now(clock)): Double {
     val o = origin; val d = dest
     if (isAirborne && o != null && d != null) {
         val flown = distKm(o.lat, o.lon, live!!.lat, live.lon)
@@ -320,7 +327,7 @@ fun Flight.remainingKm(): Double {
 enum class Tone { Neutral, Good, Warn, Bad, Info }
 
 /** Short status like the airline apps: "On time", "Delayed 45m", "In the air", "Landed". */
-fun Flight.status(now: Instant = Instant.now()): Pair<String, Tone> {
+fun Flight.status(now: Instant = Instant.now(clock)): Pair<String, Tone> {
     val delay = if (phase(now) <= Phase.Departure) depDelay else arrDelay
     return when {
         cancelled -> "Cancelled" to Tone.Bad
@@ -408,7 +415,7 @@ private fun wxFrom(j: JSONObject) = Wx(
 /** All flights, in one JSON file in app storage. Mutate on the main thread only. */
 object Store {
     val flights = mutableStateListOf<Flight>()
-    private lateinit var file: File
+    internal lateinit var file: File
     /** Called after every save (the app refreshes the home screen widget). */
     var onChange: (() -> Unit)? = null
 
@@ -475,18 +482,19 @@ object Store {
 
 /** Small settings in SharedPreferences, mirrored in Compose state so screens update when they change. */
 object Prefs {
-    private lateinit var sp: SharedPreferences
+    private var sp: SharedPreferences? = null // until init, values live in memory only (unit tests)
     private val values = mutableStateMapOf<String, String>()
 
     fun init(ctx: Context) {
-        sp = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE)
-        sp.all.forEach { (k, v) -> values[k] = v.toString() }
+        val p = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE)
+        sp = p
+        p.all.forEach { (k, v) -> values[k] = v.toString() }
     }
 
     operator fun get(k: String) = values[k] ?: ""
     operator fun set(k: String, v: String) {
         values[k] = v
-        sp.edit().putString(k, v).apply()
+        sp?.edit()?.putString(k, v)?.apply()
     }
 
     fun flag(k: String, default: Boolean = true) = values[k]?.let { it == "1" } ?: default
