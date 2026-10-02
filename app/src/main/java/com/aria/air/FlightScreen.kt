@@ -129,6 +129,10 @@ fun FlightScreen(id: String) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FloatingButton(Icons.Filled.ChevronLeft, "Back") { Nav.pop() }
+            if (Debug.on) {
+                Spacer(Modifier.width(8.dp))
+                FloatingButton(Icons.Filled.BugReport, "Copy debug info") { Debug.copy(ctx, Debug.flightReport(f), "Flight debug info") }
+            }
             Text(
                 if (solid) "${f.label} · ${f.from} → ${f.to}" else "", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
@@ -492,8 +496,15 @@ private fun YourPlane(f: Flight, now: Instant) {
     Group(Modifier.animateContentSize()) {
         if (f.reg.isEmpty()) {
             Text(
-                if (Prefs.hasStatusKey) "The airline hasn't assigned an aircraft yet, usually about a day before. Its inbound flight shows here once it has."
-                else "Add an AeroDataBox or FlightAware key (Settings › Data) to see the aircraft for this flight and whether its previous flight is on time.",
+                if (Prefs.hasStatusKey) {
+                    val dep = (f.dep ?: f.depGuess).atZone(f.fromTz)
+                    val checked = f.updated?.let { " Last checked ${time(it, f.fromTz)}." }.orEmpty()
+                    // An early departure is usually flown by a plane that spent the night at the gate, transponder off.
+                    if (Duration.between(now, f.dep ?: f.depGuess) < Duration.ofHours(12) && dep.hour < 11)
+                        "The flight status service hasn't named the aircraft yet. For an early flight like this it's usually " +
+                            "parked here overnight, so there's no inbound flight to watch.$checked"
+                    else "The flight status service hasn't named the aircraft yet. Its inbound flight shows here once it does.$checked"
+                } else "Add an AeroDataBox or FlightAware key (Settings › Data) to see the aircraft for this flight and whether its previous flight is on time.",
                 fontSize = 15.sp, color = C.secondary, modifier = Modifier.padding(16.dp),
             )
             return@Group

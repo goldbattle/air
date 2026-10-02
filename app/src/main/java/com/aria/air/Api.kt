@@ -21,7 +21,12 @@ object Api {
     /** Every request goes through here; unit tests swap in canned responses. */
     internal var http: (url: String, headers: Map<String, String>) -> String = ::fetch
 
-    private fun get(url: String, headers: Map<String, String> = emptyMap()) = http(url, headers)
+    private fun get(url: String, headers: Map<String, String> = emptyMap()): String {
+        val start = System.currentTimeMillis()
+        val r = runCatching { http(url, headers) }
+        Debug.request(url, System.currentTimeMillis() - start, r)
+        return r.getOrThrow()
+    }
 
     private fun fetch(url: String, headers: Map<String, String>): String {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -354,6 +359,8 @@ object Api {
      * Refreshes everything we can about a flight. [auto] = background poll, which spends status API calls sparingly:
      * every 15 min around the flight, every 6 h before it.
      */
+    private fun key0(a: String, b: String) = a.isNotBlank() || b.isNotBlank()
+
     suspend fun refresh(f: Flight, auto: Boolean = false, foreground: Boolean = false): Flight {
         // A takeoff time that can't be ours (saved from another leg or day on the same number) is dropped first.
         var n = if (f.depActual != null && f.tookOff == null) f.copy(depActual = null) else f
@@ -364,12 +371,15 @@ object Api {
         val every = statusEvery(f, now)
         val due = every != null && (f.updated == null || Duration.between(f.updated, now) > every)
         val today = localToday()
+        Debug.note("refresh ${f.label} ${f.date}: auto=$auto status due=$due (every $every, last ${f.updated})")
         if (!auto || due) {
+            fun failed(e: Throwable) = Debug.note("status lookup for ${f.label} failed: $e")
             val status = when {
-                adbKey.isNotBlank() && f.date in today.minusDays(360)..today.plusDays(360) -> runCatching { adb(n, adbKey) }.getOrNull()
-                aeroKey.isNotBlank() && f.date in today.minusDays(9)..today.plusDays(2) -> runCatching { aero(n, aeroKey) }.getOrNull()
+                adbKey.isNotBlank() && f.date in today.minusDays(360)..today.plusDays(360) -> runCatching { adb(n, adbKey) }.onFailure(::failed).getOrNull()
+                aeroKey.isNotBlank() && f.date in today.minusDays(9)..today.plusDays(2) -> runCatching { aero(n, aeroKey) }.onFailure(::failed).getOrNull()
                 else -> null
             }
+            if (status == null && key0(adbKey, aeroKey)) Debug.note("status lookup for ${f.label}: no matching flight that day")
             if (adbKey.isNotBlank() || aeroKey.isNotBlank()) countLookup()
             status?.let { n = it.copy(updated = now) }
         }

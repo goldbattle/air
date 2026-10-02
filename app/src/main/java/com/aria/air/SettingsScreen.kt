@@ -23,7 +23,7 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 // Frequent on the left, rare on the right, so the common ones never need a sideways scroll.
-private val TABS = listOf("About", "Data", "Import", "Notifications", "Duplicates")
+private val TABS get() = listOf("About", "Data", "Import", "Notifications", "Duplicates") + if (Debug.on) listOf("Debug") else emptyList()
 
 object SettingsNav { var tab by mutableIntStateOf(0) }
 
@@ -38,6 +38,7 @@ fun SettingsScreen() = Page("Settings") {
             "About" -> AboutTab()
             "Data" -> DataTab()
             "Import" -> ImportTab()
+            "Debug" -> DebugTab()
             "Notifications" -> NotificationsTab()
             else -> DuplicatesTab()
         }
@@ -67,7 +68,18 @@ private fun AboutTab() {
     }
     SectionHeader("Build")
     Group {
-        Cell("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        // Seven taps turn on developer options, as on Android itself.
+        var taps by remember { mutableIntStateOf(0) }
+        val ctx = LocalContext.current
+        Cell("Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") {
+            if (Debug.on) { Toast.makeText(ctx, "Developer options are already on", Toast.LENGTH_SHORT).show(); return@Cell }
+            taps++
+            if (taps >= 7) {
+                Prefs.setFlag("dev", true)
+                Debug.note("developer options on")
+                Toast.makeText(ctx, "Developer options on: see the Debug tab", Toast.LENGTH_SHORT).show()
+            } else if (taps >= 4) Toast.makeText(ctx, "${7 - taps} more taps to turn on developer options", Toast.LENGTH_SHORT).show()
+        }
         Hairline()
         UpdateRows()
         Hairline()
@@ -278,4 +290,51 @@ private fun ImportTab() {
         "Cloud backup is off, so export now and then and keep the file somewhere safe. To restore, import the file " +
             "above; it only adds flights you don't have and never overwrites.",
     )
+}
+
+// ---------- Debug (developer options) ----------
+
+@Composable
+private fun DebugTab() {
+    val ctx = LocalContext.current
+    var log by remember { mutableStateOf(Debug.log()) }
+    SectionHeader("Report")
+    Group {
+        Cell("Copy debug report", subtitle = "Upcoming flights, their status data and the request log", color = C.blue) {
+            Debug.copy(ctx, Debug.report(ctx))
+        }
+        Hairline()
+        Cell("Share debug report", color = C.blue) { Debug.share(ctx, Debug.report(ctx)) }
+    }
+    Footnote("Flight pages get a bug button that copies just that flight. Reports include names and confirmation codes, never API keys.")
+    SectionHeader("Phone")
+    Group {
+        Cell("Model", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        Hairline()
+        Cell("Android", "${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
+        Hairline()
+        Cell("Status lookups this month", fmtInt(Api.lookupsThisMonth()))
+        Hairline()
+        Cell("Status key", if (Prefs.adbKey.isNotBlank()) "AeroDataBox" else if (Prefs.aeroKey.isNotBlank()) "FlightAware" else "None")
+    }
+    SectionHeader("Request log")
+    Group {
+        Text(
+            log.lines().takeLast(40).reversed().joinToString("\n").ifBlank { "Nothing yet. Requests show here as the app makes them." },
+            fontSize = 11.sp, lineHeight = 15.sp, color = C.secondary,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(12.dp),
+        )
+        Hairline(0.dp)
+        Cell("Refresh", color = C.blue) { log = Debug.log() }
+        Hairline()
+        Cell("Clear log", color = C.blue) { Debug.clear(); log = "" }
+    }
+    SectionHeader("Developer options")
+    Group {
+        Cell("Turn off developer options", color = C.red) {
+            Debug.clear()
+            Prefs.setFlag("dev", false)
+            SettingsNav.tab = 0
+        }
+    }
 }

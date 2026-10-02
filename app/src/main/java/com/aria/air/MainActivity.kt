@@ -48,6 +48,7 @@ class App : Application() {
         Guides.init(this)
         Store.init(this)
         Mail.init(this)
+        Debug.init(this)
         Store.onChange = { scope.launch { FlightWidget.refresh(this@App) } }
         Notify.channels(this)
         TrackWorker.schedule(this)
