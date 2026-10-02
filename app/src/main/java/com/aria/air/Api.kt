@@ -212,6 +212,14 @@ object Api {
         val arrived = status == "Arrived"
         val arrEst = t(arr, "revisedTime") ?: t(arr, "predictedTime")
         val aircraft = leg.optJSONObject("aircraft")
+        // AeroDataBox can hand back data an hour old near departure (missing a fresh delay); then its estimate isn't
+        // good enough to call the flight on time.
+        val asOf = leg.optString("lastUpdatedUtc").takeIf { it.isNotEmpty() }
+            ?.let { runCatching { java.time.OffsetDateTime.parse(it, adbTime).toInstant() }.getOrNull() }
+        val nowAdb = Instant.now(clock)
+        val stale = asOf != null && Duration.between(asOf, nowAdb) > Duration.ofMinutes(30) &&
+            Duration.between(nowAdb, t(dep, "scheduledTime") ?: f.depGuess) < Duration.ofHours(6)
+        if (stale) Debug.note("${f.label}: AeroDataBox data is from $asOf, too old to trust its estimate")
         // Gates, baggage and the tail are FlightAware's once it gave them; an empty value never clears one.
         val faOwns = f.faAt != null && Duration.between(f.faAt, Instant.now(clock)) < FA_OWNS
         fun keep(old: String, new: String) = if (faOwns && old.isNotEmpty()) old else new.ifEmpty { old }
@@ -223,7 +231,9 @@ object Api {
         if (disputed) Debug.note("${f.label}: AeroDataBox now says gates $said (was ${f.adbSaid}), asking FlightAware")
         f.copy(
             from = iata(dep).ifEmpty { f.from }, to = iata(arr).ifEmpty { f.to },
-            depSched = t(dep, "scheduledTime") ?: f.depSched, depEst = t(dep, "revisedTime"),
+            depSched = t(dep, "scheduledTime") ?: f.depSched,
+            // Stale data still counts when it shows a delay; it just can't vouch for "on time".
+            depEst = t(dep, "revisedTime")?.takeIf { e -> !stale || t(dep, "scheduledTime")?.let { e > it } == true },
             depActual = if (departed) t(dep, "runwayTime") ?: t(dep, "revisedTime") ?: f.depActual else null,
             arrSched = t(arr, "scheduledTime") ?: f.arrSched, arrEst = arrEst,
             arrActual = if (arrived) t(arr, "revisedTime") ?: t(arr, "runwayTime") ?: arrEst ?: f.arrSched else null,

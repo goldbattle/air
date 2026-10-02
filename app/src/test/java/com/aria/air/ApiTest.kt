@@ -204,6 +204,22 @@ class ApiTest : AirTest() {
     }
 
     @Test
+    fun staleAeroDataBoxCantSayOnTime() = runBlocking {
+        val onTime = adbLeg("2026-10-02", "SFO", "Expected").replace("15:20Z", "15:00Z")
+        fun asOf(t: String) = onTime.replace("\"status\"", "\"lastUpdatedUtc\":\"2026-10-02 $t\",\"status\"")
+        // Data from 11:50, 10 min before NOW: its "on time" estimate stands.
+        responses["flights/number/UA100/2026-10-02"] = "[${asOf("11:50Z")}]"
+        assertTrue(Api.adb(flight(null), "key")!!.depEst != null)
+        // From 11:00, an hour old with departure 3 h away: no estimate, so no "On time".
+        responses["flights/number/UA100/2026-10-02"] = "[${asOf("11:00Z")}]"
+        assertNull(Api.adb(flight(null), "key")!!.depEst)
+        // But an old delay is still a delay.
+        responses["flights/number/UA100/2026-10-02"] =
+            "[${adbLeg("2026-10-02", "SFO", "Expected").replace("\"status\"", "\"lastUpdatedUtc\":\"2026-10-02 11:00Z\",\"status\"")}]"
+        assertEquals(Instant.parse("2026-10-02T15:20:00Z"), Api.adb(flight(null), "key")!!.depEst)
+    }
+
+    @Test
     fun aeroDataBoxStates() = runBlocking {
         val f = flight(null)
         responses["flights/number/UA100"] = "[${adbLeg("2026-10-02", "SFO", "Expected")}]"
