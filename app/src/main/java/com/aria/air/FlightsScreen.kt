@@ -2,6 +2,7 @@ package com.aria.air
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
@@ -9,6 +10,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ConnectingAirports
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
@@ -65,8 +68,11 @@ fun FlightsScreen(friends: Boolean) {
     val names = Store.friends
     val all = Store.flights.filter { it.mine != friends }
         .filter { !friends || who == 0 || it.friend == names.getOrNull(who - 1) }
-    val (up, done) = all.partition { it.phase(now) != Phase.Done }
-    val shown = if (past == 0) up.sortedBy { it.depGuess } else done.sortedByDescending { it.depGuess }
+    // Connecting flights travel together: a journey is upcoming until its last leg is done.
+    val (upJ, doneJ) = connections(all).partition { j -> j.any { it.phase(now) != Phase.Done } }
+    val up = upJ.flatten()
+    val done = doneJ.flatten()
+    val shown = if (past == 0) upJ else doneJ.reversed()
 
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var refreshing by remember { mutableStateOf(false) }
@@ -91,19 +97,59 @@ fun FlightsScreen(friends: Boolean) {
             Spacer(Modifier.height(4.dp))
         }
         if (shown.isEmpty()) item("empty") { EmptyState(friends, past == 1) }
-        shown.groupBy { it.date }.forEach { (date, list) ->
+        shown.groupBy { it.first().date }.forEach { (date, list) ->
+            val count = list.sumOf { it.size }
             item("h$date") {
                 Text(
-                    dayLabel(date) + if (list.size > 1) " · ${list.size} flights" else "",
+                    dayLabel(date) + if (count > 1) " · $count flights" else "",
                     fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 18.dp, bottom = 8.dp),
                 )
             }
-            items(list, key = { it.id }) { f ->
-                FlightCard(f, now, showFriend = friends) { Nav.push(Screen.FlightDetail(f.id)) }
+            items(list, key = { it.first().id }) { legs ->
+                if (legs.size == 1) FlightCard(legs[0], now, showFriend = friends) { Nav.push(Screen.FlightDetail(legs[0].id)) }
+                else ConnectionCard(legs, now, showFriend = friends)
                 Spacer(Modifier.height(10.dp))
             }
         }
     }
+}
+
+/** Connecting flights as one journey: the route on top, then each leg's card with the layover between them. */
+@Composable
+fun ConnectionCard(legs: List<Flight>, now: Instant, showFriend: Boolean) = Column(
+    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(C.blue.copy(alpha = 0.08f))
+        .border(1.dp, C.blue.copy(alpha = 0.25f), RoundedCornerShape(18.dp)).padding(6.dp),
+) {
+    val first = legs.first()
+    val last = legs.last()
+    Row(Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.ConnectingAirports, null, tint = C.blue, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            (listOf(first.from) + legs.map { it.to }).joinToString(" → "),
+            fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        Text(span(Duration.between(first.dep ?: first.depGuess, last.arr ?: last.arrGuess)), fontSize = 13.sp, color = C.secondary)
+    }
+    legs.forEachIndexed { i, f ->
+        if (i > 0) Layover(legs[i - 1], f)
+        FlightCard(f, now, showFriend) { Nav.push(Screen.FlightDetail(f.id)) }
+    }
+}
+
+/** "1h 20m layover in Denver" between two legs. */
+@Composable
+private fun Layover(a: Flight, b: Flight) = Row(
+    Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+) {
+    Icon(Icons.Filled.Schedule, null, tint = C.secondary, modifier = Modifier.size(14.dp))
+    Spacer(Modifier.width(6.dp))
+    Text(layoverText(a, b), fontSize = 13.sp, color = C.secondary)
+}
+
+fun layoverText(a: Flight, b: Flight): String {
+    val gap = Duration.between(a.arr ?: a.arrGuess, b.dep ?: b.depGuess)
+    return "${span(gap)} layover in ${a.dest?.city ?: a.to}"
 }
 
 @Composable

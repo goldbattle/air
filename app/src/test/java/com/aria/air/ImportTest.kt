@@ -261,6 +261,7 @@ class ImportTest : AirTest() {
     fun travelerNames() {
         assertEquals("John Doe", Importer.traveler("Passenger: JOHN DOE\nSeat 21C"))
         assertEquals("John Doe", Importer.traveler("Passenger name: MR JOHN DOE"))
+        assertEquals("Jane Q. Doe", Importer.traveler("Passenger: Jane Q. Doe. Thu, Oct 22, 2026. UA 455")) // stops at the sentence
         assertEquals("Jane Doe", Importer.traveler("Traveller: Jane Doe"))
         assertEquals("Jane", Importer.traveler("Jane's Trip to Boston"))
         assertEquals("John McDoe", Importer.traveler("Passengers\nJohn McDoe"))

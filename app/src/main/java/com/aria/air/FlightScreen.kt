@@ -95,6 +95,11 @@ fun FlightScreen(id: String) {
             item("body") {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     Spacer(Modifier.height(8.dp))
+                    val legs = f.connection()
+                    if (legs.size > 1) {
+                        LegBar(f, legs)
+                        Spacer(Modifier.height(12.dp))
+                    }
                     PhaseBar(f, current = phase, shown = shown) { shown = it }
                     Spacer(Modifier.height(12.dp))
                     Group(Modifier.animateContentSize()) {
@@ -152,6 +157,31 @@ private fun FloatingButton(icon: ImageVector, description: String, onClick: () -
     Modifier.size(40.dp).clip(CircleShape).background(C.card.copy(alpha = 0.92f)).clickable(onClick = onClick),
     contentAlignment = Alignment.Center,
 ) { Icon(icon, description, tint = C.label, modifier = Modifier.size(22.dp)) }
+
+/** The legs of a connection, this one highlighted; tap another to switch to it without going back to the list. */
+@Composable
+private fun LegBar(f: Flight, legs: List<Flight>) = Group {
+    val i = legs.indexOfFirst { it.id == f.id }
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.ConnectingAirports, null, tint = C.blue, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Leg ${i + 1} of ${legs.size}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        legs.getOrNull(i + 1)?.let { Text(layoverText(f, it), fontSize = 13.sp, color = C.secondary) }
+    }
+    Row(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        legs.forEach { leg ->
+            val on = leg.id == f.id
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) C.blue else C.fill)
+                    .clickable(enabled = !on) { Nav.replace(Screen.FlightDetail(leg.id)) }.padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("${leg.from} → ${leg.to}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (on) Color.White else C.label, maxLines = 1)
+                Text(leg.label, fontSize = 12.sp, color = if (on) Color.White.copy(alpha = 0.85f) else C.secondary, maxLines = 1)
+            }
+        }
+    }
+}
 
 @Composable
 private fun MapHeader(f: Flight) {

@@ -182,6 +182,8 @@ object Importer {
     fun traveler(text: String): String? {
         val t = clean(text)
         var raw = travelerRes.firstNotNullOfOrNull { it.find(t)?.groupValues?.get(1)?.trim() } ?: return null
+        // "Jane Q. Doe. Thu, Oct 22" -> "Jane Q. Doe": a sentence ends after a word, not after an initial.
+        raw = raw.replace(Regex("(?<=\\p{L}{2})[.;,](\\s.*)?$"), "")
         if ('/' in raw) raw = raw.substringAfter('/') + " " + raw.substringBefore('/') // "DOE/JOHN" -> "JOHN DOE"
         val words = raw.split(Regex("[ \\t]+")).filter { it.isNotEmpty() && it.uppercase() !in setOf("MR", "MS", "MRS", "MISS", "DR") }
         if (words.isEmpty() || words.any { it.lowercase() in setOf("the", "and", "your", "this", "information", "details") }) return null

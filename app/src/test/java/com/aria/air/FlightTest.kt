@@ -12,6 +12,27 @@ import java.time.LocalTime
 class FlightTest : AirTest() {
     private val sfo get() = Db.airport("SFO")!!
 
+    // ---------- Connections ----------
+
+    @Test
+    fun connectingFlightsBecomeOneJourney() {
+        val a = flight(hours(2), block = hours(3), from = "SFO", to = "DEN")              // lands in 5 h
+        val b = flight(hours(6), block = hours(2), from = "DEN", to = "PIT").copy(number = "200") // 1 h layover
+        val c = flight(hours(10), block = hours(1), from = "PIT", to = "BOS").copy(number = "300") // 2 h layover
+        assertTrue(connects(a, b))
+        assertEquals(listOf(listOf(a, b, c)), connections(listOf(c, a, b))) // order doesn't matter
+        // Same-day return trip: out in the morning, back 13 h later. Two journeys.
+        val back = flight(hours(18), from = "DEN", to = "SFO").copy(number = "400")
+        assertFalse(connects(a, back.copy(from = "DEN")))
+        // Not from where the last one landed, or someone else's flight.
+        assertFalse(connects(a, b.copy(from = "ORD")))
+        assertFalse(connects(a, b.copy(friend = "Alex")))
+        // Overnight (17 h): only when booked together.
+        val next = flight(hours(22), from = "DEN", to = "PIT").copy(number = "500")
+        assertFalse(connects(a, next))
+        assertTrue(connects(a.copy(booking = "TESTAB"), next.copy(booking = "TESTAB")))
+    }
+
     // ---------- Phases and status ----------
 
     @Test

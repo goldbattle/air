@@ -77,6 +77,8 @@ object Nav {
     val stack = mutableStateListOf<Screen>()
     fun push(s: Screen) { stack += s }
     fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
+    /** Swaps the top screen, so Back skips it (moving between legs of a connection). */
+    fun replace(s: Screen) { if (stack.isEmpty()) push(s) else stack[stack.lastIndex] = s }
     fun open(tab: Tab) { this.tab = tab; stack.clear() }
 }
 
