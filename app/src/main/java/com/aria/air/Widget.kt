@@ -125,7 +125,10 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
     val night = isNight(ctx)
     val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
     val c = android.graphics.Canvas(bmp)
-    val arc = greatCircle(o.lat, o.lon, d.lat, d.lon, 96)
+    // Once there's a recorded path (Routes.kt), the line is that, then the plan from the plane on; split at the plane.
+    val mp = f.paths(emptyList(), emptyList(), 0)
+    val flown = mp.flown.size
+    val arc = if (flown < 2) greatCircle(o.lat, o.lon, d.lat, d.lon, 96) else unwrap(mp.flown + mp.rest.drop(1), o.lon)
 
     // Fit the arc into a band in the middle, leaving the top row and the big countdown readable.
     val top = h * 0.30f
@@ -162,7 +165,7 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
         phase == Phase.InFlight -> f.progress()
         else -> 0.0
     }
-    val split = (p * (arc.size - 1)).roundToInt().coerceIn(0, arc.size - 1)
+    val split = (if (flown >= 2) flown - 1 else (p * (arc.size - 1)).roundToInt()).coerceIn(0, arc.size - 1)
     val blue = if (night) 0xFF0A84FF.toInt() else 0xFF007AFF.toInt()
     val stroke = 3.2f * density
     fun line(from: Int, to: Int, paint: android.graphics.Paint) {

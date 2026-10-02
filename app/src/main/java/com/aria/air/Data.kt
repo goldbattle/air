@@ -196,7 +196,7 @@ fun Flight.inboundLine(): String? {
 /** Last ADS-B fix for a flight (from adsb.lol). */
 data class Live(
     val lat: Double, val lon: Double, val altFt: Int, val speedKt: Int, val track: Double, val vrateFpm: Int,
-    val at: Instant, val onGround: Boolean, val aircraft: String = "", val reg: String = "",
+    val at: Instant, val onGround: Boolean, val aircraft: String = "", val reg: String = "", val hex: String = "",
 )
 
 data class Flight(
@@ -223,6 +223,8 @@ data class Flight(
     val live: Live? = null,
     val updated: Instant? = null,     // last successful status refresh
     val alerted: String = "",         // events already notified (comma list), so alerts fire once
+    // The flown path (Routes.kt): recorded while live, completed from adsb.lol's trace of the plane ([hex]) after landing.
+    val track: List<Pt> = emptyList(), val hex: String = "", val trackAt: Instant? = null,
 )
 
 val Flight.code get() = "$airline$number"
@@ -379,6 +381,7 @@ fun Flight.toJson(): JSONObject = JSONObject()
                 .put("aircraft", it.aircraft).put("reg", it.reg))
         }
     }
+    .putTrack(this)
 
 fun flightFrom(j: JSONObject) = Flight(
     id = j.getString("id"), airline = j.getString("airline"), number = j.getString("number"),
@@ -407,7 +410,7 @@ fun flightFrom(j: JSONObject) = Flight(
             it.optInt("vrate"), Instant.ofEpochMilli(it.getLong("at")), it.optBoolean("ground"),
             it.optString("aircraft"), it.optString("reg"))
     },
-)
+).withTrack(j)
 
 private fun wxFrom(j: JSONObject) = Wx(
     j.getDouble("t"), j.getInt("code"), j.optDouble("wind", 0.0), Instant.ofEpochMilli(j.getLong("at")), Instant.ofEpochMilli(j.getLong("fetched")),
@@ -447,7 +450,7 @@ object Store {
 
     fun upsert(f: Flight) {
         val i = flights.indexOfFirst { it.id == f.id }
-        if (i >= 0) flights[i] = f else flights.add(f)
+        if (i >= 0) flights[i] = f.copy(track = mergeTracks(flights[i].track, f.track)) else flights.add(f)
         save()
     }
 
@@ -556,7 +559,7 @@ fun Flight.mergedWith(o: Flight) = copy(
     seat = seat.ifEmpty { o.seat }, booking = booking.ifEmpty { o.booking },
     notes = listOf(notes, o.notes).filter { it.isNotEmpty() }.distinct().joinToString("\n"),
     work = work || o.work, live = live ?: o.live, updated = updated ?: o.updated,
-    depWx = depWx ?: o.depWx, arrWx = arrWx ?: o.arrWx,
+    depWx = depWx ?: o.depWx, arrWx = arrWx ?: o.arrWx, track = track.ifEmpty { o.track },
 )
 
 object Dupes {
