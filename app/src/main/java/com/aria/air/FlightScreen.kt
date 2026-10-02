@@ -190,12 +190,18 @@ private fun LegBar(f: Flight, legs: List<Flight>) = Group {
 @Composable
 private fun MapHeader(f: Flight) {
     val o = f.origin; val d = f.dest
+    var full by remember { mutableStateOf(false) } // full-screen map (Radar.kt)
+    if (full) FullMap(f) { full = false }
     // The map runs behind the title; the route sits in the upper part and a gradient keeps the title readable.
-    Box(Modifier.fillMaxWidth()) {
+    Box(Modifier.fillMaxWidth().clickable(interactionSource = null, indication = null) { full = true }) {
         if (o != null && d != null) {
+            val radar = rememberRadar(f)
+            val wx = f.routeWx?.takeIf { Layers.weather }
             WorldMap(
                 listOf(MapRoute(o, d, highlight = true)), Modifier.matchParentSize(), focus = true, centerY = 0.36f,
                 plane = f.live?.takeIf { f.isAirborne },
+                under = radar?.let { r -> { x, y -> drawRadar(r, x, y) } }, // radar layer (Radar.kt)
+                over = wx?.let { w -> { x, y -> drawRouteWx(w, o.lon, x, y) } }, // route weather layer (RouteWx.kt)
             )
         }
         Box(
@@ -204,6 +210,7 @@ private fun MapHeader(f: Flight) {
             ),
         )
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 250.dp, bottom = 8.dp)) { Title(f) }
+        LayersButton(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 56.dp, end = 16.dp))
     }
 }
 
@@ -607,6 +614,7 @@ private fun TimesCard(f: Flight) {
             )
             Box(Modifier.weight(1f).height(0.5.dp).background(C.separator))
         }
+        RouteWxLine(f)
         TimeRow(f.to, f.dest?.name, f.arr, f.arrSched, f.toTz, f.arrDelay, f.arrWx, listOf(f.arrTerminal.let { if (it.isEmpty()) "" else "Terminal $it" }, f.arrGate.let { if (it.isEmpty()) "" else "Gate $it" }, f.baggage.let { if (it.isEmpty()) "" else "Bags $it" })) { setTime(false) }
     }
     if (!f.hasTimes) Footnote("Tap a time to set it. With an AeroDataBox or FlightAware key, times fill in automatically.")

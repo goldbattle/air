@@ -37,7 +37,9 @@ installs them in place.
 There's no account and no analytics. Air only talks to:
 
 - [adsb.lol](https://adsb.lol) for routes and live positions, and [Open-Meteo](https://open-meteo.com) for weather
-  (flight callsigns, airport coordinates and dates).
+  (flight callsigns, airport coordinates and dates; weather along the route sends points on the great circle).
+- [RainViewer](https://www.rainviewer.com/api.html) for the weather radar on the map, from 6 hours before departure
+  until landing (only map tile coordinates).
 - [AeroDataBox](https://aerodatabox.com) or [FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/),
   only if you add your own key (flight numbers and dates).
 - GitHub, to check for updates.

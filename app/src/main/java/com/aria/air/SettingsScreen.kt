@@ -90,7 +90,8 @@ private fun AboutTab() {
     SectionHeader("Privacy")
     Group {
         Text(
-            "Flight numbers, airport coordinates and dates go to adsb.lol and Open-Meteo (and AeroDataBox or FlightAware " +
+            "Flight numbers, airport coordinates and dates go to adsb.lol and Open-Meteo, map tile coordinates to " +
+                "RainViewer for radar (and flight numbers to AeroDataBox or FlightAware " +
                 "if you add a key). Air asks GitHub for updates and, if you link email, reads booking emails straight from " +
                 "your mail server. Nothing else leaves this phone.",
             fontSize = 14.sp, color = C.secondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -158,7 +159,9 @@ private fun DataTab() {
     Group {
         Cell("adsb.lol", subtitle = "Routes, live position, speed, altitude")
         Hairline()
-        Cell("Open-Meteo", subtitle = "Takeoff and landing weather")
+        Cell("Open-Meteo", subtitle = "Weather at takeoff, landing and along the route")
+        Hairline()
+        Cell("RainViewer", subtitle = "Radar on the map near departure · sends only map tile coordinates")
         Hairline()
         SwitchCell("Celsius", Prefs.flag("celsius", false)) { Prefs.setFlag("celsius", it) }
     }

@@ -21,7 +21,7 @@ object Api {
     /** Every request goes through here; unit tests swap in canned responses. */
     internal var http: (url: String, headers: Map<String, String>) -> String = ::fetch
 
-    private fun get(url: String, headers: Map<String, String> = emptyMap()): String {
+    internal fun get(url: String, headers: Map<String, String> = emptyMap()): String {
         val start = System.currentTimeMillis()
         val r = runCatching { http(url, headers) }
         Debug.request(url, System.currentTimeMillis() - start, r)
@@ -281,28 +281,29 @@ object Api {
         val o = f.origin ?: return f
         val d = f.dest ?: return f
         val now = Instant.now(clock)
-        // Forecasts sharpen as the day nears: daily when days away, every 6 h in the last 3 days, every 3 h on the day.
-        fun every(at: Instant) = Duration.between(now, at).let {
-            when {
-                it < Duration.ofHours(12) -> Duration.ofHours(3)
-                it < Duration.ofDays(3) -> Duration.ofHours(6)
-                else -> Duration.ofHours(24)
-            }
-        }
-        fun stale(w: Wx?, happened: Boolean) = w == null || (!happened && Duration.between(w.fetched, now) > every(w.at))
+        fun stale(w: Wx?, happened: Boolean) = w == null || (!happened && Duration.between(w.fetched, now) > wxEvery(now, w.at))
         var n = f
         val dep = f.dep ?: f.depGuess
         val arr = f.arr ?: f.arrGuess
         if (stale(f.depWx, dep < now.minus(Duration.ofHours(1)))) weather(o, dep)?.let { n = n.copy(depWx = it) }
         if (stale(f.arrWx, arr < now.minus(Duration.ofHours(1)))) weather(d, arr)?.let { n = n.copy(arrWx = it) }
-        return n
+        return RouteWeather.refresh(n)
+    }
+
+    /** Forecasts sharpen as the day nears: daily when days away, every 6 h in the last 3 days, every 3 h on the day. */
+    fun wxEvery(now: Instant, at: Instant): Duration = Duration.between(now, at).let {
+        when {
+            it < Duration.ofHours(12) -> Duration.ofHours(3)
+            it < Duration.ofDays(3) -> Duration.ofHours(6)
+            else -> Duration.ofHours(24)
+        }
     }
 
     /** One pass over every flight still missing weather (e.g. an imported history). */
     suspend fun backfillWeather() {
-        for (f in Store.flights.filter { it.depWx == null || it.arrWx == null }.toList()) {
+        for (f in Store.flights.filter { it.depWx == null || it.arrWx == null || it.routeWx == null }.toList()) {
             val n = runCatching { refreshWeather(f) }.getOrDefault(f)
-            if (n != f) Store.get(f.id)?.let { cur -> Store.upsert(cur.copy(depWx = n.depWx ?: cur.depWx, arrWx = n.arrWx ?: cur.arrWx)) }
+            if (n != f) Store.get(f.id)?.let { cur -> Store.upsert(cur.copy(depWx = n.depWx ?: cur.depWx, arrWx = n.arrWx ?: cur.arrWx, routeWx = n.routeWx ?: cur.routeWx)) }
             kotlinx.coroutines.delay(250) // be polite to the free API
         }
     }
