@@ -216,7 +216,6 @@ private fun MapHeader(f: Flight, pulls: Int) {
             ),
         )
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 250.dp, bottom = 8.dp)) { Title(f) }
-        LayersButton(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 56.dp, end = 16.dp))
     }
 }
 
