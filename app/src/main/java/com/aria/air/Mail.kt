@@ -122,7 +122,7 @@ object Mail {
 
     fun add(ctx: Context, email: String, host: String, password: String) {
         accounts.removeAll { it.email == email }
-        accounts += MailAccount(email, host, Vault.encrypt(password.replace(" ", "")))
+        accounts += MailAccount(email, host, Vault.encrypt(password.filterNot { it.isWhitespace() }))
         save(); schedule(ctx)
     }
 
@@ -149,7 +149,7 @@ object Mail {
 
     /** Signs in and opens the mailbox; null when it works, else what went wrong. */
     suspend fun test(email: String, host: String, password: String): String? = withContext(Dispatchers.IO) {
-        runCatching { Imap.connect(host).use { it.login(email, password.replace(" ", "")); it.examine("INBOX") }; null }.getOrElse(::friendly)
+        runCatching { Imap.connect(host).use { it.login(email, password.filterNot { it.isWhitespace() }); it.examine("INBOX") }; null }.getOrElse(::friendly)
     }
 
     suspend fun test(a: MailAccount): String? = runCatching { Vault.decrypt(a.secret) }.fold({ test(a.email, a.host, it) }, ::friendly)

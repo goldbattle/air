@@ -1,5 +1,17 @@
 package com.aria.air
 
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.focus.onFocusEvent
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.relocation.BringIntoViewRequester
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -165,7 +177,7 @@ fun Page(
     refreshing: Boolean = false,
     onRefresh: (() -> Unit)? = null,
     content: LazyListScope.() -> Unit,
-) = Column(Modifier.fillMaxSize().background(C.bg).statusBarsPadding()) {
+) = Column(Modifier.fillMaxSize().background(C.bg).statusBarsPadding().imePadding()) {
     Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (onBack != null) BackButton(backLabel, onBack)
         Spacer(Modifier.weight(1f))
@@ -277,25 +289,50 @@ fun FieldCell(
     placeholder: String = "",
     secret: Boolean = false,
     caps: Boolean = false,
+    keyboard: KeyboardType = KeyboardType.Text,
     onChange: (String) -> Unit,
-) = Row(
-    Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-    verticalAlignment = Alignment.CenterVertically,
 ) {
-    Text(label, fontSize = 17.sp, color = C.label)
-    Spacer(Modifier.width(16.dp))
-    BasicTextField(
-        value, onChange, singleLine = true, modifier = Modifier.weight(1f),
-        textStyle = TextStyle(fontSize = 17.sp, color = C.secondary, textAlign = TextAlign.End), cursorBrush = SolidColor(C.blue),
-        keyboardOptions = KeyboardOptions(capitalization = if (caps) KeyboardCapitalization.Characters else KeyboardCapitalization.Words),
-        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-        decorationBox = { inner ->
-            Box(contentAlignment = Alignment.CenterEnd) {
-                if (value.isEmpty()) Text(placeholder, fontSize = 17.sp, color = C.tertiary, maxLines = 1)
-                inner()
-            }
-        },
-    )
+    val focus = remember { FocusRequester() }
+    val bring = remember { BringIntoViewRequester() }
+    var focused by remember { mutableStateOf(false) }
+    // Re-run as the keyboard slides in (its height changes each frame), so the row ends up just above it.
+    val ime = WindowInsets.ime.getBottom(LocalDensity.current)
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val below = with(LocalDensity.current) { 160.dp.toPx() } // room for the next field and the button
+    LaunchedEffect(focused, ime) {
+        if (focused) { delay(80); bring.bringIntoView(Rect(0f, 0f, size.width.toFloat(), size.height + below)) }
+    }
+    Row(
+        // Tapping anywhere on the row types into it; once focused, the row scrolls clear of the keyboard.
+        Modifier.fillMaxWidth().onSizeChanged { size = it }.bringIntoViewRequester(bring).clickable { focus.requestFocus() }
+            .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 17.sp, color = C.label)
+        Spacer(Modifier.width(16.dp))
+        BasicTextField(
+            value, onChange, singleLine = true,
+            modifier = Modifier.weight(1f).focusRequester(focus)
+                .onFocusEvent { focused = it.isFocused },
+            textStyle = TextStyle(fontSize = 17.sp, color = C.secondary, textAlign = TextAlign.End), cursorBrush = SolidColor(C.blue),
+            keyboardOptions = KeyboardOptions(
+                capitalization = when {
+                    caps -> KeyboardCapitalization.Characters
+                    secret || keyboard != KeyboardType.Text -> KeyboardCapitalization.None
+                    else -> KeyboardCapitalization.Words
+                },
+                autoCorrectEnabled = !secret && keyboard == KeyboardType.Text,
+                keyboardType = if (secret) KeyboardType.Password else keyboard,
+            ),
+            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+            decorationBox = { inner ->
+                Box(contentAlignment = Alignment.CenterEnd) {
+                    if (value.isEmpty()) Text(placeholder, fontSize = 17.sp, color = C.tertiary, maxLines = 1)
+                    inner()
+                }
+            },
+        )
+    }
 }
 
 @Composable

@@ -385,13 +385,7 @@ private fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
         if (found.isEmpty()) return@Page
 
         item("legend") {
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Badge("Auto", C.indigo)
-                Text(
-                    "  was read from the document. Tap any row to fix it; red means it's needed.",
-                    fontSize = 13.sp, color = C.secondary,
-                )
-            }
+            Footnote("Values marked Auto were read from the document. Tap any row to change it; red rows need filling in.")
         }
 
         if (!askedWho && traveler != null) item("isyou") {

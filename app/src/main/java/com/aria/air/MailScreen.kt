@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,22 +53,22 @@ fun MailScreen() {
                 )
                 SectionHeader("1. Turn on 2-Step Verification")
                 Group {
-                    Cell("Open Google account security", icon = Icons.Filled.Security, chevron = true) { browse("https://myaccount.google.com/signinoptions/twosv") }
+                    Cell("Open Google account security", chevron = true) { browse("https://myaccount.google.com/signinoptions/twosv") }
                 }
                 Footnote("Skip this if it's already on. Google only offers app passwords with it.")
                 SectionHeader("2. Create an app password")
                 Group {
-                    Cell("Open App passwords", icon = Icons.Filled.Key, chevron = true) { browse("https://myaccount.google.com/apppasswords") }
+                    Cell("Open App passwords", chevron = true) { browse("https://myaccount.google.com/apppasswords") }
                 }
                 Footnote("Name it \"Air\" and tap Create. Copy the 16-letter password Google shows.")
                 SectionHeader("3. Enter it here")
                 Group {
-                    FieldCell("Gmail address", email, "you@gmail.com") { email = it.trim().lowercase(); test = null }
+                    FieldCell("Gmail address", email, "you@gmail.com", keyboard = KeyboardType.Email) { email = it.trim().lowercase(); test = null }
                     Hairline()
                     FieldCell("App password", pass, "16 letters", secret = true) { pass = it; test = null }
                     if (host != Mail.GMAIL) {
                         Hairline()
-                        FieldCell("IMAP server", host, "imap.example.com") { host = it.trim().lowercase(); test = null }
+                        FieldCell("IMAP server", host, "imap.example.com", keyboard = KeyboardType.Uri) { host = it.trim().lowercase(); test = null }
                     }
                 }
                 test?.let { Footnote(it) }
@@ -96,10 +97,10 @@ fun MailScreen() {
     } else Page("Email", onBack = { Nav.pop() }, backLabel = "Settings") {
         item("found") {
             Group {
-                Cell("Flights found in email", "${Mail.suggestions.size}", icon = Icons.Filled.Inbox, chevron = true) { Nav.push(Screen.MailFound) }
-                Hairline(50.dp)
+                Cell("Flights found in email", "${Mail.suggestions.size}", chevron = true) { Nav.push(Screen.MailFound) }
+                Hairline()
                 val busy = Mail.progress != null
-                Cell(Mail.progress ?: "Scan now", icon = Icons.Filled.Refresh, color = if (busy) C.secondary else C.blue) {
+                Cell(Mail.progress ?: "Scan now", color = if (busy) C.secondary else C.blue) {
                     if (!busy) Mail.scanNow(ctx)
                 }
             }
@@ -114,14 +115,14 @@ fun MailScreen() {
             SectionHeader("Accounts")
             Group {
                 Mail.accounts.forEachIndexed { i, a ->
-                    if (i > 0) Hairline(50.dp)
+                    if (i > 0) Hairline()
                     Cell(
-                        a.email, icon = Icons.Filled.AlternateEmail, chevron = true,
+                        a.email, chevron = true,
                         subtitle = a.error.ifEmpty { if (a.scanned > 0) "Scanned ${ago(Instant.ofEpochMilli(a.scanned))}" else "Not scanned yet" },
                     ) { open = a; test = null }
                 }
-                Hairline(50.dp)
-                Cell("Add account", icon = Icons.Filled.Add, color = C.blue) { adding = true }
+                Hairline()
+                Cell("Add account", color = C.blue) { adding = true }
             }
         }
 

@@ -18,7 +18,10 @@ Made-up example data (the two flights in the air are real flights at the time of
 
 - Live tracking for your own flights and friends', with gate, delay, and takeoff/landing notifications.
 - A flight page with a route map, schedule, weather at both ends, and (while airborne) speed, altitude and heading.
-- Import by sharing a confirmation email, PDF, or screenshot to the app; OCR and PDF text extraction run on-device.
+- Import by sharing a confirmation email, PDF, or screenshot to the app, or by printing an email to "Save to Air".
+  OCR and PDF text extraction run on-device.
+- Optional Gmail scan: link one or more mailboxes with an app password and Air finds past and new bookings for you
+  to pick from. Manual, or every few weeks in the background.
 - A passport view: every past flight on a map, with miles, time in the air, and top airports/airlines/routes.
 - A home screen widget with the route map and a countdown to your next flight.
 - Bundled guides for airports (terminals, maps, lounges) and airlines (check-in, baggage, alliance).
@@ -31,10 +34,17 @@ installs them in place.
 
 ## Privacy
 
-Air talks to [adsb.lol](https://adsb.lol) for routes and live positions (sends a flight's callsign) and, if you add
-your own key, [FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) for schedules and gates (sends
-the flight number). Nothing else leaves the phone, there's no account and no analytics, and backups are a JSON file
-you export yourself.
+There's no account and no analytics. Air only talks to:
+
+- [adsb.lol](https://adsb.lol) for routes and live positions, and [Open-Meteo](https://open-meteo.com) for weather
+  (flight callsigns, airport coordinates and dates).
+- [AeroDataBox](https://aerodatabox.com) or [FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/),
+  only if you add your own key (flight numbers and dates).
+- GitHub, to check for updates.
+- Your mail server, only if you link an email account. Mail is read straight to the phone with an app password that
+  is encrypted on the device.
+
+Backups are a JSON file you export yourself.
 
 ## Building from source
 

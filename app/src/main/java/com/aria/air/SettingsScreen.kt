@@ -23,7 +23,7 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 // Frequent on the left, rare on the right, so the common ones never need a sideways scroll.
-private val TABS = listOf("About", "Data", "Backup", "Notifications", "Duplicates")
+private val TABS = listOf("About", "Data", "Import", "Notifications", "Duplicates")
 
 object SettingsNav { var tab by mutableIntStateOf(0) }
 
@@ -37,7 +37,7 @@ fun SettingsScreen() = Page("Settings") {
         when (TABS[SettingsNav.tab]) {
             "About" -> AboutTab()
             "Data" -> DataTab()
-            "Backup" -> BackupTab()
+            "Import" -> ImportTab()
             "Notifications" -> NotificationsTab()
             else -> DuplicatesTab()
         }
@@ -78,8 +78,9 @@ private fun AboutTab() {
     SectionHeader("Privacy")
     Group {
         Text(
-            "Only flight numbers, airport coordinates and dates leave this phone, to adsb.lol, Open-Meteo, " +
-                "and AeroDataBox or FlightAware if you add a key. Nothing else does.",
+            "Flight numbers, airport coordinates and dates go to adsb.lol and Open-Meteo (and AeroDataBox or FlightAware " +
+                "if you add a key). Air asks GitHub for updates and, if you link email, reads booking emails straight from " +
+                "your mail server. Nothing else leaves this phone.",
             fontSize = 14.sp, color = C.secondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         )
     }
@@ -240,7 +241,7 @@ private fun DuplicatesTab() {
 // ---------- Backup ----------
 
 @Composable
-private fun BackupTab() {
+private fun ImportTab() {
     val ctx = LocalContext.current
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -248,33 +249,33 @@ private fun BackupTab() {
             .onSuccess { Toast.makeText(ctx, "Exported ${Store.flights.size} flights", Toast.LENGTH_SHORT).show() }
             .onFailure { Toast.makeText(ctx, "Export failed: ${it.message}", Toast.LENGTH_LONG).show() }
     }
-    val restore = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        runCatching { Store.import(ctx.contentResolver.openInputStream(uri)!!.use { it.reader().readText() }) }
-            .onSuccess { Toast.makeText(ctx, "Added $it flights", Toast.LENGTH_SHORT).show(); TrackWorker.schedule(ctx) }
-            .onFailure { Toast.makeText(ctx, "Not an Air backup: ${it.message}", Toast.LENGTH_LONG).show() }
-    }
-    val byAir = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    // One picker for everything: importInto tells a backup, a byAir CSV and a confirmation apart.
+    val file = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) importInto(ctx, uri, null, friend = false)
     }
-    SectionHeader("Backup")
+    val accounts = Mail.accounts.size
+    SectionHeader("Import")
     Group {
-        Cell("Export all flights", chevron = true) { export.launch("air-backup-${LocalDate.now()}.json") }
+        Cell(
+            "Gmail", if (accounts > 0) "$accounts linked" else null, chevron = true,
+            subtitle = if (Mail.suggestions.isNotEmpty()) "${Mail.suggestions.size} flights found to review" else "Find bookings in your mailbox",
+        ) { Nav.push(Screen.MailAccounts) }
         Hairline()
-        Cell("Restore from backup", chevron = true) { restore.launch(arrayOf("application/json", "*/*")) }
-        Hairline()
-        Cell("Import byAir export", subtitle = "The .csv from byAir › Export flights", chevron = true) {
-            byAir.launch(arrayOf("text/*", "*/*"))
+        Cell("From a file", subtitle = "PDF, screenshot, email, byAir .csv or Air backup", chevron = true) {
+            file.launch(arrayOf("*/*"))
         }
-        Hairline(50.dp)
-        Cell("Find flights in email", subtitle = "Scan Gmail for confirmations", icon = Icons.Filled.Email, chevron = true) { Nav.push(Screen.MailAccounts) }
         Hairline()
-        Cell("Print to Air", subtitle = "Turn on Air here once, then print emails to \"Save to Air\"", icon = Icons.Filled.Print, chevron = true) {
+        Cell("Print to Air", subtitle = "Turn on once, then print any email to \"Save to Air\"", chevron = true) {
             ctx.startActivity(Intent(Settings.ACTION_PRINT_SETTINGS))
         }
     }
+    Footnote("You can also share a confirmation to Air from any app. Everything is read on this phone.")
+    SectionHeader("Backup")
+    Group {
+        Cell("Export all flights", chevron = true) { export.launch("air-backup-${LocalDate.now()}.json") }
+    }
     Footnote(
-        "Cloud backup is off, so export now and then and keep the file somewhere safe. " +
-            "Restoring only adds flights you don't have; it never overwrites.",
+        "Cloud backup is off, so export now and then and keep the file somewhere safe. To restore, import the file " +
+            "above; it only adds flights you don't have and never overwrites.",
     )
 }

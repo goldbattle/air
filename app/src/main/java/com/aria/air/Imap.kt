@@ -13,7 +13,6 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Base64
 import java.util.Locale
-import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -93,7 +92,7 @@ class Imap(private val sock: Socket) : Closeable {
 
     fun examine(box: String): Box {
         val rs = cmd("EXAMINE ${quote(box)}")
-        fun num(k: String) = rs.firstNotNullOfOrNull { Regex("\\[$k (\\d+)]", RegexOption.IGNORE_CASE).find(it.line) }?.groupValues?.get(1)?.toLong() ?: 0
+        fun num(k: String) = rs.firstNotNullOfOrNull { Regex("\\[$k (\\d+)\\]",RegexOption.IGNORE_CASE).find(it.line) }?.groupValues?.get(1)?.toLong() ?: 0
         return Box(num("UIDVALIDITY"), num("UIDNEXT"))
     }
 
@@ -114,19 +113,20 @@ class Imap(private val sock: Socket) : Closeable {
     }
 
     companion object {
-        private val literalAtEnd = Regex("\\{(\\d+)}$")
+        // Android's regex engine (ICU), unlike the JVM's, rejects an unescaped '}' or ']'.
+        private val literalAtEnd = Regex("\\{(\\d+)\\}$")
+        private val literal = Regex("\\{(\\d+)\\}")
 
         /** TLS on port 993, with the certificate checked against the host name. */
         fun connect(host: String): Imap {
             // Emulator testing against a stub on the host machine, in debug builds only (R8 drops this in release).
             if (BuildConfig.DEBUG && host == "10.0.2.2") return Imap(Socket().apply { connect(InetSocketAddress(host, 1143), 20_000); soTimeout = 60_000 })
-            val s = SSLSocketFactory.getDefault().createSocket() as SSLSocket
-            s.connect(InetSocketAddress(host, 993), 20_000)
-            s.soTimeout = 60_000
+            // Connect first (for the timeout), then layer TLS on top naming the host, so the server gets SNI.
+            val plain = Socket().apply { connect(InetSocketAddress(host, 993), 20_000); soTimeout = 60_000 }
+            val s = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(plain, host, 993, true) as SSLSocket
+            // The TLS layer checks the certificate is for this host before any byte, password included, is sent.
+            s.sslParameters = s.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
             s.startHandshake()
-            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, s.session)) {
-                s.close(); throw Error("Certificate doesn't match $host")
-            }
             return Imap(s)
         }
 
@@ -155,7 +155,7 @@ class Imap(private val sock: Socket) : Closeable {
                             out += b.toString()
                         }
                         else -> {
-                            val m = Regex("\\{(\\d+)}").matchAt(s, i)
+                            val m = literal.matchAt(s, i)
                             if (m != null) { i = m.range.last + 1; out += literals.getOrNull(lit++); continue }
                             // Atoms run to a space or paren, except inside [...] ("BODY[HEADER.FIELDS (FROM)]").
                             val st = i
