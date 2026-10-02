@@ -108,14 +108,14 @@ object RouteWeather {
      * landing so the record is what happened rather than a forecast.
      */
     suspend fun refresh(f: Flight): Flight {
-        if (f.cancelled) return f
+        if (f.cancelled || !Layers.weather) return f // off by default: nothing fetched unless the layer is on
         val now = Instant.now(clock)
         val arr = f.arr ?: f.arrGuess
         val w = f.routeWx
         val stale = w == null || w.fetched < arr &&
             (arr < now.minus(Duration.ofHours(1)) || Duration.between(w.fetched, now) > Api.wxEvery(now, f.dep ?: f.depGuess))
         if (!stale) return f
-        return runCatching { fetch(f) }.getOrNull()?.let { f.copy(routeWx = it) } ?: f
+        return runCatching { Layers.loading(Layers.WEATHER) { fetch(f) } }.getOrNull()?.let { f.copy(routeWx = it) } ?: f
     }
 }
 

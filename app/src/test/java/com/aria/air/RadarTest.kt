@@ -114,8 +114,10 @@ class RadarTest : AirTest() {
         assertFalse(Radar.shown(flight(hours(7)), NOW))     // too early: radar says nothing about then
         assertTrue(Radar.shown(flight(hours(5)), NOW))
         assertTrue(Radar.shown(flight(hours(-2)), NOW))     // in the air
-        assertFalse(Radar.shown(flight(hours(-6)), NOW))    // landed
-        assertFalse(Radar.shown(flight(hours(-2)).copy(arrActual = NOW.minusSeconds(60)), NOW))
+        // Landed: live radar stays until the flight's rain map is published (WxMaps.LAG after landing), then stops.
+        assertTrue(Radar.shown(flight(hours(-6)), NOW))
+        assertTrue(Radar.shown(flight(hours(-2)).copy(arrActual = NOW.minusSeconds(60)), NOW))
+        assertFalse(Radar.shown(flight(hours(-13)), NOW))
         assertFalse(Radar.shown(flight(hours(1)).copy(cancelled = true), NOW))
         Prefs.setFlag(Layers.RADAR, false)
         assertFalse(Radar.shown(flight(hours(1)), NOW))
@@ -170,6 +172,7 @@ class RadarTest : AirTest() {
 
     @Test
     fun refreshedWhileUpcomingThenOnceAfterLanding() = runBlocking {
+        Prefs.setFlag(Layers.WEATHER, true) // off by default; nothing is fetched then
         responses["open-meteo.com"] = "[" + (0 until RouteWeather.N).joinToString(",") { hourly({ 0 }) } + "]"
         val fresh = RouteWx(emptyList(), NOW.minus(hours(1)))
         val f = flight(hours(24 * 5))

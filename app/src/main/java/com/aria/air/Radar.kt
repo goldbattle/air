@@ -1,5 +1,8 @@
 package com.aria.air
 
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.unit.sp
+import java.time.ZoneId
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -26,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -65,33 +69,45 @@ import kotlin.math.roundToInt
 import kotlin.math.sinh
 import kotlin.math.tan
 
-/** Map layers the flight page's layers button toggles (Prefs flags, all on by default except "all recent routes"). */
+/** Map layers the flight page's layers button toggles: radar on by default; the ones that cost requests off. */
 object Layers {
     const val RADAR = "layerRadar"
     const val WEATHER = "layerWeather"
     const val ROUTES = "layerRoutes"
-    const val ROUTES_ALL = "layerRoutesAll"
     val radar get() = Prefs.flag(RADAR)
-    val weather get() = Prefs.flag(WEATHER)
+    val weather get() = Prefs.flag(WEATHER, default = false)
+    val routes get() = Prefs.flag(ROUTES, default = false)
+    fun on(key: String) = when (key) { WEATHER -> weather; ROUTES -> routes; else -> radar }
+
+    /** Layers with a download in progress, for the spinner next to their switch. */
+    val busy = androidx.compose.runtime.mutableStateMapOf<String, Int>()
+
+    suspend fun <T> loading(layer: String, block: suspend () -> T): T {
+        busy[layer] = (busy[layer] ?: 0) + 1
+        try { return block() } finally { busy[layer] = (busy[layer] ?: 1) - 1 }
+    }
 }
 
-/** The small layers button in a corner of the flight map, with its menu of toggles. */
+/** The layers button in a corner of the flight map (same as the map's other buttons), with its menu of toggles. */
 @Composable
 fun LayersButton(modifier: Modifier = Modifier) = Box(modifier) {
     var open by remember { mutableStateOf(false) }
-    Box(
-        Modifier.size(32.dp).clip(CircleShape).background(C.card.copy(alpha = 0.85f)).clickable { open = true },
-        contentAlignment = Alignment.Center,
-    ) { Icon(Icons.Filled.Layers, "Map layers", tint = C.secondary, modifier = Modifier.size(18.dp)) }
+    MapButton(Icons.Filled.Layers, "Map layers") { open = true }
     DropdownMenu(open, { open = false }, containerColor = C.card) {
-        for ((label, key, default) in listOf(
-            Triple("Radar", Layers.RADAR, true), Triple("Route weather", Layers.WEATHER, true),
-            Triple("Past route", Layers.ROUTES, true), Triple("All recent routes", Layers.ROUTES_ALL, false),
-        )) {
-            val on = Prefs.flag(key, default)
+        for ((label, key) in listOf("Radar" to Layers.RADAR, "Route weather" to Layers.WEATHER, "Past routes" to Layers.ROUTES)) {
+            val on = Layers.on(key)
             DropdownMenuItem(
                 text = { Text(label) },
-                trailingIcon = { Switch(on, null, Modifier.size(width = 44.dp, height = 24.dp)) },
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Still downloading in the background: a small spinner beside the switch.
+                        if ((Layers.busy[key] ?: 0) > 0) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = C.secondary)
+                            Spacer(Modifier.width(10.dp))
+                        }
+                        Switch(on, null, Modifier.size(width = 44.dp, height = 24.dp))
+                    }
+                },
                 onClick = { Prefs.setFlag(key, !on) },
             )
         }
@@ -210,8 +226,8 @@ object Radar {
 
     /** Worth showing from [LEAD] before departure until landing, on a flight that's on, with the layer on. */
     /** Whether radar means anything for [f] now: from [LEAD] before departure to landing. */
-    fun relevant(f: Flight, now: Instant) = !f.cancelled && f.arrActual == null && f.origin != null &&
-        f.dest != null && now >= f.depGuess.minus(LEAD) && now < f.arrGuess
+    fun relevant(f: Flight, now: Instant) = !f.cancelled && f.origin != null && f.dest != null &&
+        now >= f.depGuess.minus(LEAD) && now < (f.arr ?: f.arrGuess).plus(WxMaps.LAG)
 
     /** Relevant and the radar layer is on. The layer only hides the picture; fetching and the cache ignore it. */
     fun shown(f: Flight, now: Instant) = Layers.radar && relevant(f, now)
@@ -222,12 +238,13 @@ object Radar {
     private val tried = ConcurrentHashMap<String, Instant>()
 
     /** The latest frame's tile path prefix and time. */
-    suspend fun frame(): Pair<String, Instant>? = withContext(Dispatchers.IO) {
+    suspend fun frame(near: Instant? = null): Pair<String, Instant>? = withContext(Dispatchers.IO) {
         runCatching {
             val j = JSONObject(Api.get(MAPS))
             val past = j.getJSONObject("radar").getJSONArray("past")
-            val last = past.getJSONObject(past.length() - 1)
-            j.getString("host") + last.getString("path") to Instant.ofEpochSecond(last.getLong("time"))
+            val frames = (0 until past.length()).map { past.getJSONObject(it) }
+            val pick = near?.let { t -> frames.minByOrNull { Math.abs(it.getLong("time") - t.epochSecond) } } ?: frames.last()
+            j.getString("host") + pick.getString("path") to Instant.ofEpochSecond(pick.getLong("time"))
         }.getOrNull()
     }
 
@@ -260,7 +277,7 @@ object Radar {
         }
         if (due(tried[f.id], now)) {
             tried[f.id] = now
-            runCatching { fetch(f) }.onFailure { Debug.note("radar for ${f.label} failed: $it") }.getOrNull()
+            runCatching { Layers.loading(Layers.RADAR) { fetch(f) } }.onFailure { Debug.note("radar for ${f.label} failed: $it") }.getOrNull()
                 ?.let { cache[f.id] = it; save(f.id, it) }
         }
         return cached(f)
@@ -299,12 +316,16 @@ object Radar {
 
     private suspend fun fetch(f: Flight): RadarImage? {
         val o = f.origin!!; val d = f.dest!!
-        return fetchBox(box(greatCircle(o.lat, o.lon, d.lat, d.lon)))
+        // Landed: the frame closest to the middle of the flight (RainViewer keeps two hours), until the rain map is out.
+        val landed = f.arrActual != null || Instant.now(clock) > f.arrGuess
+        val dep = f.dep ?: f.depGuess
+        val mid = dep.plus(Duration.between(dep, f.arr ?: f.arrGuess).dividedBy(2))
+        return fetchBox(box(greatCircle(o.lat, o.lon, d.lat, d.lon)), if (landed) mid else null)
     }
 
-    /** The latest radar over any box: the route's, or what's on screen when zoomed in (sharper tiles). */
-    suspend fun fetchBox(b: GeoBox): RadarImage? = withContext(Dispatchers.IO) {
-        val (frame, at) = frame() ?: return@withContext null
+    /** Radar over a box: the latest frame, or the one nearest [near]. */
+    suspend fun fetchBox(b: GeoBox, near: Instant? = null): RadarImage? = withContext(Dispatchers.IO) {
+        val (frame, at) = frame(near) ?: return@withContext null
         val p = plan(b)
         val tiles = Array(p.nx * p.ny) { k ->
             val bytes = runCatching { tile(tileUrl(frame, p.z, p.x0 + k % p.nx, p.y0 + k / p.nx)) }.getOrNull() ?: return@Array null
@@ -406,6 +427,15 @@ fun FullMap(f: Flight, pulls: Int, onClose: () -> Unit) {
                     }
                 },
             )
+            radar?.let { r ->
+                Text(
+                    (if (r.box == WxMaps.WORLD) "Rain " else "Radar ") + time(r.frame, ZoneId.systemDefault()) +
+                        if (r.frame.atZone(ZoneId.systemDefault()).toLocalDate() != java.time.LocalDate.now()) ", " + dayLabel(r.frame.atZone(ZoneId.systemDefault()).toLocalDate()) else "",
+                    fontSize = 12.sp, color = C.secondary,
+                    modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(16.dp)
+                        .clip(CircleShape).background(C.card.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
             Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (Debug.on) {
                     MapButton(Icons.Filled.BugReport, "Copy map debug info") {
@@ -421,17 +451,18 @@ fun FullMap(f: Flight, pulls: Int, onClose: () -> Unit) {
     }
 }
 
+/** A round map control, the same as the flight page's back and share buttons. */
 @Composable
-private fun MapButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) = Box(
-    Modifier.size(40.dp).clip(CircleShape).background(C.card.copy(alpha = 0.9f)).clickable(onClick = onClick),
+fun MapButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) = Box(
+    Modifier.size(40.dp).clip(CircleShape).background(C.card.copy(alpha = 0.92f)).clickable(onClick = onClick),
     contentAlignment = Alignment.Center,
-) { Icon(icon, label, tint = C.label, modifier = Modifier.size(20.dp)) }
+) { Icon(icon, label, tint = C.label, modifier = Modifier.size(22.dp)) }
 
 /** What the full-screen map is showing, for the debug report. */
 private fun mapReport(f: Flight, radar: RadarImage?, camera: Camera?, fit: Camera?, size: IntSize) = buildString {
     val now = Instant.now(clock)
     appendLine("== map  ${size.width}x${size.height}  camera ${camera ?: "fit"}  fit $fit")
-    appendLine("layers radar=${Layers.radar} weather=${Layers.weather} routes=${Prefs.flag(Layers.ROUTES)} all=${Prefs.flag(Layers.ROUTES_ALL, false)}")
+    appendLine("layers radar=${Layers.radar} weather=${Layers.weather} routes=${Layers.routes} busy=${Layers.busy}")
     appendLine("live radar relevant=${Radar.relevant(f, now)}  rain map relevant=${WxMaps.relevant(f, now)} slot ${WxMaps.keyFor(f)}")
     appendLine("radar ${radar?.let { "frame ${it.frame} fetched ${it.fetched} box ${it.box} ${it.bitmap.width}x${it.bitmap.height}" } ?: "none"}")
     appendLine("route weather ${f.routeWx?.let { w -> "fetched ${w.fetched}: " + w.pts.joinToString { "${it.sky()}/${it.code}/${it.mm}mm/cape ${it.cape}" } } ?: "none"}")

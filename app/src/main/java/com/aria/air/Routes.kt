@@ -23,6 +23,10 @@ data class Pt(val lat: Double, val lon: Double, val altFt: Int = 0, val t: Long 
 
 const val TRACK_GAP = 120L // seconds between kept points
 const val TRACK_MAX = 300
+/** Past routes kept and drawn per flight number and route. */
+const val MAX_PAST = 20
+/** Days looked back the first time past routes are fetched; after that one more day each day. */
+const val FIRST_DAYS = 7L
 
 /** [p] appended if it's [TRACK_GAP] after the last point; past [TRACK_MAX] points every other one is dropped. */
 fun List<Pt>.add(p: Pt): List<Pt> {
@@ -99,7 +103,7 @@ fun Flight.paths(fetched: List<List<Pt>>, others: List<Flight>, max: Int, now: I
 /** [paths] for the map: past paths per the Layers toggles (one by default, up to 3 with "all"). */
 fun Flight.mapPaths(): MapPaths = paths(
     Routes.cache[routeKey]?.legs.orEmpty(), Store.flights,
-    if (!Prefs.flag("layerRoutes")) 0 else if (Prefs.flag("layerRoutesAll", false)) 3 else 1,
+    if (Layers.routes) MAX_PAST else 0,
 )
 
 /** [pts] as (lat, lon) with longitudes unwrapped to stay continuous, starting near [ref]. */
@@ -117,7 +121,8 @@ fun unwrap(pts: List<Pt>, ref: Double): List<Pair<Double, Double>> {
 // ---------- Recent paths from adsb.lol ----------
 
 /** Recent paths flown under a flight number, as fetched [at]. */
-data class Typical(val at: Instant, val legs: List<List<Pt>>)
+/** Recent paths flown under a flight number, as fetched [at]; days back to [oldest] have been looked at. */
+data class Typical(val at: Instant, val legs: List<List<Pt>>, val oldest: java.time.LocalDate? = null)
 
 object Routes {
     val cache = mutableStateMapOf<String, Typical>()
@@ -135,7 +140,8 @@ object Routes {
             j.keys().forEach { k ->
                 val e = j.getJSONObject(k)
                 val legs = e.getJSONArray("legs").let { a -> (0 until a.length()).map { ptsFrom(a.getJSONArray(it)) } }
-                Instant.ofEpochMilli(e.getLong("at")).takeIf { it > old }?.let { cache[k] = Typical(it, legs) }
+                val oldest = e.optString("oldest").takeIf { it.isNotEmpty() }?.let(java.time.LocalDate::parse)
+                Instant.ofEpochMilli(e.getLong("at")).takeIf { it > old }?.let { cache[k] = Typical(it, legs, oldest) }
             }
         }
     }
@@ -143,7 +149,9 @@ object Routes {
     private fun save() {
         val f = file ?: return
         val j = JSONObject()
-        cache.forEach { (k, v) -> j.put(k, JSONObject().put("at", v.at.toEpochMilli()).put("legs", JSONArray(v.legs.map { it.toJson() }))) }
+        cache.forEach { (k, v) ->
+            j.put(k, JSONObject().put("at", v.at.toEpochMilli()).put("legs", JSONArray(v.legs.map { it.toJson() })).put("oldest", v.oldest?.toString() ?: ""))
+        }
         File(f.path + ".tmp").apply { writeText(j.toString()) }.renameTo(f)
     }
 
@@ -223,7 +231,7 @@ object Routes {
                     j.optString("actual_on").let { it.isNotEmpty() && it != "null" } &&
                     runCatching { Math.abs(Instant.parse(j.getString("scheduled_out")).epochSecond - ours) > 3 * 3600 }.getOrDefault(false)
             }
-            done.take(if (Prefs.flag(Layers.ROUTES_ALL, false)) 3 else 1).mapNotNull { j ->
+            done.take(MAX_PAST).mapNotNull { j ->
                 runCatching {
                     Api.countLookup()
                     val pos = JSONObject(Api.get("https://aeroapi.flightaware.com/aeroapi/flights/${j.getString("fa_flight_id")}/track", head))
@@ -241,11 +249,17 @@ object Routes {
      * that flew it that day (its modeS hex), and adsb.lol's daily history has that plane's path. One lookup a day,
      * three with "All recent routes"; nothing without a key.
      */
-    private fun earlierDays(f: Flight, cs: String): List<List<Pt>> {
+    private suspend fun earlierDays(f: Flight, cs: String): List<List<Pt>> {
         val key = Prefs.adbKey.takeIf { it.isNotBlank() } ?: return emptyList()
-        val days = if (Prefs.flag(Layers.ROUTES_ALL, false)) 3L else 1L
-        return (1..days).flatMap { back ->
-            val day = f.date.minusDays(back)
+        // A queue worked through a little at a time: a week back the first time; then each day the latest day plus
+        // a few older ones, until there are MAX_PAST paths or two months are covered.
+        val c = cache[f.routeKey]
+        val days = (if (c?.oldest == null) (1..FIRST_DAYS).map { f.date.minusDays(it) }
+            else listOf(f.date.minusDays(1)) +
+                (if (c.legs.size < MAX_PAST) (1..3L).map { c.oldest.minusDays(it) }.filter { it >= f.date.minusDays(60) } else emptyList())).distinct()
+        listOfNotNull(days.minOrNull(), c?.oldest).minOrNull()?.let { scanned[f.routeKey] = it }
+        return days.flatMapIndexed { i, day ->
+            if (i > 0) kotlinx.coroutines.delay(1100) // AeroDataBox's free plan allows about one request a second
             runCatching {
                 Api.countLookup()
                 val legs = JSONArray(Api.get(
@@ -265,18 +279,30 @@ object Routes {
         }
     }
 
-    /** For the flight on screen only: fetches recent paths when [due] ([force] = the refresh button) and caches them. */
+    private val updating = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val scanned = ConcurrentHashMap<String, java.time.LocalDate>()
+
+    /**
+     * For the flight on screen only, with the Past routes layer on: fetches recent paths when [due] ([force] = pull to
+     * refresh) and adds them to the cache (newest [MAX_PAST] kept). One fetch per route at a time.
+     */
     suspend fun update(f: Flight, force: Boolean = false) {
         val now = Instant.now(clock)
-        if (!(if (force) !f.cancelled else due(f, now))) return
-        lastTry[f.routeKey] = now
-        val legs = runCatching { fetch(f) }.getOrDefault(emptyList())
-        if (legs.isEmpty()) return
-        withContext(Dispatchers.Main) {
-            val old = cache[f.routeKey]?.legs.orEmpty()
-            cache[f.routeKey] = Typical(now, (legs + old).distinctBy { it.first().t / 600 }.sortedByDescending { it.first().t }.take(3))
-            save()
-        }
+        if (!Layers.routes || !(if (force) !f.cancelled else due(f, now))) return
+        if (!updating.add(f.routeKey)) return // already fetching (opening the page and a pull at once)
+        try {
+            lastTry[f.routeKey] = now
+            val legs = runCatching { Layers.loading(Layers.ROUTES) { fetch(f) } }.getOrDefault(emptyList())
+            withContext(Dispatchers.Main) {
+                val old = cache[f.routeKey]?.legs.orEmpty()
+                // Remembered even when nothing new turned up, so the next look only covers the latest day.
+                cache[f.routeKey] = Typical(
+                    now, (legs + old).distinctBy { it.first().t / 600 }.sortedByDescending { it.first().t }.take(MAX_PAST),
+                    scanned.remove(f.routeKey) ?: cache[f.routeKey]?.oldest,
+                )
+                save()
+            }
+        } finally { updating.remove(f.routeKey) }
     }
 
     // ---------- The inbound plane, from its trace ----------

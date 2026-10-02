@@ -84,8 +84,13 @@ fun FlightScreen(id: String) {
         }
     }
 
-    // Past routes of this flight number, upcoming or finished (once a day; Routes.kt).
-    LaunchedEffect(id) { Store.get(id)?.let { Routes.update(it) } }
+    // Past routes and route weather when their layers are on: on opening, and as soon as one is switched on.
+    val routesOn = Layers.routes; val weatherOn = Layers.weather
+    LaunchedEffect(id, routesOn) { Store.get(id)?.let { Routes.update(it) } }
+    LaunchedEffect(id, weatherOn) {
+        if (!weatherOn) return@LaunchedEffect
+        Store.get(id)?.let { cur -> RouteWeather.refresh(cur).routeWx?.let { w -> Store.get(id)?.let { Store.upsert(it.copy(routeWx = w)) } } }
+    }
 
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     // Once the map scrolls away, the floating buttons get a solid bar with the flight number, like iOS.

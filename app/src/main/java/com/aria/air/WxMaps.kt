@@ -78,7 +78,7 @@ object WxMaps {
         if (tried[key]?.let { Duration.between(it, now) < Duration.ofMinutes(30) } == true) return@withContext null
         tried[key] = now
         runCatching {
-            val bytes = Radar.tile(url(WORLD, time(key), 2048, 1024))
+            val bytes = Layers.loading(Layers.RADAR) { Radar.tile(url(WORLD, time(key), 2048, 1024)) }
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@runCatching null
             if (blank(bmp)) { Debug.note("rain map $key not published yet"); return@runCatching null }
             file(key)?.writeBytes(bytes)
@@ -131,7 +131,7 @@ fun rememberWeatherMap(f: Flight, force: Int = 0): RadarImage? {
     LaunchedEffect(f.id, force, f.arrActual) {
         if (WxMaps.relevant(f, Instant.now(clock))) past = WxMaps.get(WxMaps.keyFor(f))
     }
-    return live ?: past?.takeIf { Layers.radar && WxMaps.relevant(f, Instant.now(clock)) }
+    return past?.takeIf { Layers.radar && WxMaps.relevant(f, Instant.now(clock)) } ?: live
 }
 
 /** [r] drawn once per world copy, so a world-wide picture also covers routes past ±180°. */
