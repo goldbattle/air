@@ -217,6 +217,9 @@ data class Flight(
     val work: Boolean = false,        // business trip (my flights)
     val depWx: Wx? = null, val arrWx: Wx? = null, // weather at takeoff and landing
     val inbound: Inbound? = null,     // the plane's previous flight, before ours
+    val faAt: Instant? = null,        // when FlightAware last gave gates, tail and inbound (they outrank AeroDataBox's)
+    val adbSaid: String = "",         // AeroDataBox's last raw "departure gate|arrival gate", to notice it changing
+    val disputed: Boolean = false,    // AeroDataBox just reported a new gate that FlightAware should confirm (not saved)
     val live: Live? = null,
     val updated: Instant? = null,     // last successful status refresh
     val alerted: String = "",         // events already notified (comma list), so alerts fire once
@@ -358,7 +361,7 @@ fun Flight.toJson(): JSONObject = JSONObject()
     .putStr("aircraft", aircraft).putStr("reg", reg)
     .put("cancelled", cancelled).put("diverted", diverted)
     .putStr("seat", seat).putStr("booking", booking).putStr("notes", notes)
-    .putStr("friend", friend).put("source", source).put("work", work).putInst("updated", updated).putStr("alerted", alerted)
+    .putStr("friend", friend).put("source", source).put("work", work).putInst("updated", updated).putInst("faAt", faAt).putStr("adbSaid", adbSaid).putStr("alerted", alerted)
     .apply {
         fun wx(w: Wx) = JSONObject().put("t", w.tempC).put("code", w.code).put("wind", w.windKmh)
             .put("at", w.at.toEpochMilli()).put("fetched", w.fetched.toEpochMilli())
@@ -387,7 +390,7 @@ fun flightFrom(j: JSONObject) = Flight(
     aircraft = j.optString("aircraft"), reg = j.optString("reg"),
     cancelled = j.optBoolean("cancelled"), diverted = j.optBoolean("diverted"),
     seat = j.optString("seat"), booking = j.optString("booking"), notes = j.optString("notes"),
-    friend = j.optString("friend"), source = j.optString("source", "manual"), work = j.optBoolean("work"), updated = j.inst("updated"),
+    friend = j.optString("friend"), source = j.optString("source", "manual"), work = j.optBoolean("work"), updated = j.inst("updated"), faAt = j.inst("faAt"), adbSaid = j.optString("adbSaid"),
     alerted = j.optString("alerted"),
     depWx = j.optJSONObject("depWx")?.let(::wxFrom), arrWx = j.optJSONObject("arrWx")?.let(::wxFrom),
     inbound = j.optJSONObject("inbound")?.let {

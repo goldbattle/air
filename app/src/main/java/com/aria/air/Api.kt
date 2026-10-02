@@ -212,17 +212,28 @@ object Api {
         val arrived = status == "Arrived"
         val arrEst = t(arr, "revisedTime") ?: t(arr, "predictedTime")
         val aircraft = leg.optJSONObject("aircraft")
+        // Gates, baggage and the tail are FlightAware's once it gave them; an empty value never clears one.
+        val faOwns = f.faAt != null && Duration.between(f.faAt, Instant.now(clock)) < FA_OWNS
+        fun keep(old: String, new: String) = if (faOwns && old.isNotEmpty()) old else new.ifEmpty { old }
+        // AeroDataBox changing its own answer is the sign of a real gate change; repeating an answer FlightAware
+        // already overruled is just stale. A change gets FlightAware asked again straight away (secondOpinion).
+        val said = "${s(dep, "gate")}|${s(arr, "gate")}"
+        val disputed = faOwns && f.adbSaid.isNotEmpty() && said != f.adbSaid &&
+            (s(dep, "gate").let { it.isNotEmpty() && it != f.depGate } || s(arr, "gate").let { it.isNotEmpty() && it != f.arrGate })
+        if (disputed) Debug.note("${f.label}: AeroDataBox now says gates $said (was ${f.adbSaid}), asking FlightAware")
         f.copy(
             from = iata(dep).ifEmpty { f.from }, to = iata(arr).ifEmpty { f.to },
             depSched = t(dep, "scheduledTime") ?: f.depSched, depEst = t(dep, "revisedTime"),
             depActual = if (departed) t(dep, "runwayTime") ?: t(dep, "revisedTime") ?: f.depActual else null,
             arrSched = t(arr, "scheduledTime") ?: f.arrSched, arrEst = arrEst,
             arrActual = if (arrived) t(arr, "revisedTime") ?: t(arr, "runwayTime") ?: arrEst ?: f.arrSched else null,
-            depTerminal = s(dep, "terminal"), depGate = s(dep, "gate"),
-            arrTerminal = s(arr, "terminal"), arrGate = s(arr, "gate"), baggage = s(arr, "baggageBelt"),
+            depTerminal = keep(f.depTerminal, s(dep, "terminal")), depGate = keep(f.depGate, s(dep, "gate")),
+            arrTerminal = keep(f.arrTerminal, s(arr, "terminal")), arrGate = keep(f.arrGate, s(arr, "gate")),
+            baggage = keep(f.baggage, s(arr, "baggageBelt")),
             aircraft = aircraft?.optString("model")?.takeIf { it.isNotEmpty() } ?: f.aircraft,
-            reg = aircraft?.optString("reg")?.takeIf { it.isNotEmpty() } ?: f.reg,
+            reg = keep(f.reg, aircraft?.optString("reg").orEmpty()),
             cancelled = status.startsWith("Cancel"), diverted = status == "Diverted",
+            adbSaid = said, disputed = disputed,
         )
     }
 
@@ -403,6 +414,48 @@ object Api {
      */
     private fun key0(a: String, b: String) = a.isNotBlank() || b.isNotBlank()
 
+    private val lastAeroTry = java.util.concurrent.ConcurrentHashMap<String, Instant>()
+
+    /**
+     * How long FlightAware's gates, baggage and tail outrank AeroDataBox's after it gave them. A real change is caught
+     * sooner than this: AeroDataBox changing its answer gets FlightAware asked again (see secondOpinion).
+     */
+    val FA_OWNS: Duration = Duration.ofHours(6)
+
+    /**
+     * With both keys, AeroDataBox does the routine lookups and FlightAware is a second opinion, asked only when it adds
+     * something: the refresh button within two days of the flight, or in the last 12 h while AeroDataBox is missing the
+     * tail number or departure gate (at most every 30 min, and only until both are known).
+     */
+    fun secondOpinion(f: Flight, now: Instant, auto: Boolean): Boolean {
+        val toDep = Duration.between(now, f.dep ?: f.depGuess)
+        if (!auto) return toDep.abs() < Duration.ofDays(2)
+        val since = lastAeroTry[f.id]?.let { Duration.between(it, now) }
+        // A gate change reported by AeroDataBox: confirm it within minutes, up to landing.
+        if (f.disputed && now < (f.arr ?: f.arrGuess)) return since == null || since >= Duration.ofMinutes(5)
+        if (toDep.isNegative || toDep > Duration.ofHours(12) || f.tookOff != null) return false
+        // Once the tail number is known, adsb.lol follows the inbound plane for free.
+        val missing = f.reg.isEmpty() || f.depGate.isEmpty()
+        return missing && (since == null || since >= Duration.ofMinutes(30))
+    }
+
+    /**
+     * AeroDataBox's view [a] with FlightAware's [b] on top where it knows more: gates (fresher at US airports), the tail
+     * number and the inbound plane. Times stay AeroDataBox's. Disagreements go in the debug log.
+     */
+    fun merge(a: Flight, b: Flight): Flight {
+        listOf(
+            "departure gate" to (a.depGate to b.depGate), "arrival gate" to (a.arrGate to b.arrGate), "tail" to (a.reg to b.reg),
+        ).filter { (_, v) -> v.first.isNotEmpty() && v.second.isNotEmpty() && v.first != v.second }
+            .forEach { (k, v) -> Debug.note("${a.label} $k: AeroDataBox ${v.first}, FlightAware ${v.second}") }
+        return a.copy(
+            faAt = Instant.now(clock), disputed = false,
+            depGate = b.depGate.ifEmpty { a.depGate }, depTerminal = b.depTerminal.ifEmpty { a.depTerminal },
+            arrGate = b.arrGate.ifEmpty { a.arrGate }, arrTerminal = b.arrTerminal.ifEmpty { a.arrTerminal },
+            baggage = b.baggage.ifEmpty { a.baggage }, reg = b.reg.ifEmpty { a.reg }, inbound = b.inbound ?: a.inbound,
+        )
+    }
+
     suspend fun refresh(f: Flight, auto: Boolean = false, foreground: Boolean = false): Flight {
         // A takeoff time that can't be ours (saved from another leg or day on the same number) is dropped first.
         var n = if (f.depActual != null && f.tookOff == null) f.copy(depActual = null) else f
@@ -422,15 +475,9 @@ object Api {
                 else -> null
             }
             if (status == null && key0(adbKey, aeroKey)) Debug.note("status lookup for ${f.label}: no matching flight that day")
-            // AeroDataBox often lacks the tail number and departure gate until late; FlightAware usually has them.
-            val gaps = status != null && adbKey.isNotBlank() && aeroKey.isNotBlank() && soon(status) && status.tookOff == null &&
-                (status.reg.isEmpty() || status.depGate.isEmpty() || status.inbound == null || status.inbound.onGround.not())
-            val filled = if (gaps) runCatching { aero(status!!, aeroKey) }.onFailure(::failed).getOrNull()?.let { fa ->
-                countLookup()
-                status!!.copy(
-                    reg = status.reg.ifEmpty { fa.reg }, depGate = status.depGate.ifEmpty { fa.depGate },
-                    depTerminal = status.depTerminal.ifEmpty { fa.depTerminal }, inbound = fa.inbound ?: status.inbound,
-                )
+            val filled = if (status != null && adbKey.isNotBlank() && aeroKey.isNotBlank() && secondOpinion(status, now, auto)) {
+                lastAeroTry[f.id] = now
+                runCatching { aero(status, aeroKey) }.onFailure(::failed).getOrNull()?.let { fa -> countLookup(); merge(status, fa) } ?: status
             } else status
             if (adbKey.isNotBlank() || aeroKey.isNotBlank()) countLookup()
             filled?.let { n = it.copy(updated = now) }

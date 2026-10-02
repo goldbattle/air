@@ -497,13 +497,10 @@ private fun YourPlane(f: Flight, now: Instant) {
         if (f.reg.isEmpty()) {
             Text(
                 if (Prefs.hasStatusKey) {
-                    val dep = (f.dep ?: f.depGuess).atZone(f.fromTz)
                     val checked = f.updated?.let { " Last checked ${time(it, f.fromTz)}." }.orEmpty()
-                    // An early departure is usually flown by a plane that spent the night at the gate, transponder off.
-                    if (Duration.between(now, f.dep ?: f.depGuess) < Duration.ofHours(12) && dep.hour < 11)
-                        "The flight status service hasn't named the aircraft yet. For an early flight like this it's usually " +
-                            "parked here overnight, so there's no inbound flight to watch.$checked"
-                    else "The flight status service hasn't named the aircraft yet. Its inbound flight shows here once it does.$checked"
+                    // Without the tail number there's no telling whether it's parked here or still on its way (a red-eye).
+                    "The flight status service hasn't named the aircraft yet, so its previous flight can't be followed." +
+                        (if (Prefs.aeroKey.isBlank()) " A FlightAware key (Settings › Data) usually has it hours ahead." else "") + checked
                 } else "Add an AeroDataBox or FlightAware key (Settings › Data) to see the aircraft for this flight and whether its previous flight is on time.",
                 fontSize = 15.sp, color = C.secondary, modifier = Modifier.padding(16.dp),
             )

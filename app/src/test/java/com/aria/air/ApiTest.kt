@@ -65,6 +65,28 @@ class ApiTest : AirTest() {
         assertFalse(ours.copy(inbound = waiting).inboundHere())
     }
 
+    @Test
+    fun flightAwareIsOnlyASecondOpinion() {
+        val soon = flight(hours(3), from = "PIT", to = "SFO")
+        // Routine: only while AeroDataBox is missing the tail number or gate, in the last 12 h.
+        assertTrue(Api.secondOpinion(soon, NOW, auto = true))
+        assertFalse(Api.secondOpinion(soon.copy(reg = "N12345", depGate = "A8"), NOW, auto = true))
+        assertFalse(Api.secondOpinion(flight(hours(20)), NOW, auto = true))
+        // The refresh button asks within two days either side, whatever is known.
+        assertTrue(Api.secondOpinion(soon.copy(reg = "N12345", depGate = "A8"), NOW, auto = false))
+        assertFalse(Api.secondOpinion(flight(hours(24 * 5)), NOW, auto = false))
+        // Merging: FlightAware's gates and tail win, AeroDataBox's times stay.
+        val adb = soon.copy(arrGate = "E4", baggage = "F5")
+        val fa = soon.copy(depGate = "A8", arrGate = "E12", reg = "N12345", depSched = NOW)
+        val m = Api.merge(adb, fa)
+        assertEquals("A8", m.depGate)
+        assertEquals("E12", m.arrGate)
+        assertEquals("N12345", m.reg)
+        assertEquals("F5", m.baggage)
+        assertEquals(adb.depSched, m.depSched)
+        assertTrue(m.faAt != null)
+    }
+
     // ---------- Cadences ----------
 
     @Test
@@ -157,6 +179,28 @@ class ApiTest : AirTest() {
         assertEquals("Boeing 737 MAX 8", n.aircraft); assertEquals("N12345", n.reg)
         assertFalse(n.cancelled); assertFalse(n.diverted)
         assertEquals("key", headers["X-RapidAPI-Key"])
+    }
+
+    @Test
+    fun aeroDataBoxLeavesFlightAwaresGatesAlone() = runBlocking {
+        responses["flights/number/UA100/2026-10-02"] = "[${adbLeg("2026-10-02", "SFO", "Expected")}]"
+        // FlightAware gave the gates and tail an hour ago: they stay, AeroDataBox's times still come through.
+        val fa = flight(null).copy(depGate = "A8", arrGate = "E12", reg = "N99999", faAt = NOW.minus(hours(1)))
+        val n = Api.adb(fa, "key")!!
+        assertEquals("A8", n.depGate); assertEquals("E12", n.arrGate); assertEquals("N99999", n.reg)
+        assertEquals(Instant.parse("2026-10-02T15:20:00Z"), n.depEst)
+        // Six hours on, AeroDataBox's own values are used again.
+        val old = Api.adb(fa.copy(faAt = NOW.minus(hours(7))), "key")!!
+        assertEquals("F12", old.depGate); assertEquals("N12345", old.reg)
+        // AeroDataBox repeating the gate FlightAware overruled is stale: no dispute. Changing its answer is a dispute.
+        assertFalse(Api.adb(fa.copy(adbSaid = "F12|B5"), "key")!!.disputed)
+        val changed = Api.adb(fa.copy(adbSaid = "F10|B5"), "key")!!
+        assertTrue(changed.disputed)
+        assertEquals("A8", changed.depGate) // kept until FlightAware confirms
+        assertTrue(Api.secondOpinion(changed.copy(depSched = NOW.minus(hours(1)), arrSched = NOW.plus(hours(3))), NOW, auto = true))
+        // An empty value from AeroDataBox never clears a known one.
+        responses["flights/number/UA100/2026-10-02"] = "[${adbLeg("2026-10-02", "SFO", "Expected").replace("\"gate\":\"F12\"", "\"gate\":null")}]"
+        assertEquals("A8", Api.adb(flight(null).copy(depGate = "A8"), "key")!!.depGate)
     }
 
     @Test
