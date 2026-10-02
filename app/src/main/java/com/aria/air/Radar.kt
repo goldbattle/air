@@ -1,5 +1,6 @@
 package com.aria.air
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.unit.sp
 import java.time.ZoneId
@@ -74,10 +75,12 @@ object Layers {
     const val RADAR = "layerRadar"
     const val WEATHER = "layerWeather"
     const val ROUTES = "layerRoutes"
+    const val FORECAST = "layerForecast"
     val radar get() = Prefs.flag(RADAR)
+    val forecast get() = Prefs.flag(FORECAST, default = false)
     val weather get() = Prefs.flag(WEATHER, default = false)
     val routes get() = Prefs.flag(ROUTES, default = false)
-    fun on(key: String) = when (key) { WEATHER -> weather; ROUTES -> routes; else -> radar }
+    fun on(key: String) = when (key) { WEATHER -> weather; ROUTES -> routes; FORECAST -> forecast; else -> radar }
 
     /** Layers with a download in progress, for the spinner next to their switch. */
     val busy = androidx.compose.runtime.mutableStateMapOf<String, Int>()
@@ -94,7 +97,10 @@ fun LayersButton(modifier: Modifier = Modifier) = Box(modifier) {
     var open by remember { mutableStateOf(false) }
     MapButton(Icons.Filled.Layers, "Map layers") { open = true }
     DropdownMenu(open, { open = false }, containerColor = C.card) {
-        for ((label, key) in listOf("Radar" to Layers.RADAR, "Route weather" to Layers.WEATHER, "Past routes" to Layers.ROUTES)) {
+        for ((label, key) in listOf(
+            "Radar" to Layers.RADAR, "Forecast radar (US)" to Layers.FORECAST,
+            "Route weather" to Layers.WEATHER, "Past routes" to Layers.ROUTES,
+        )) {
             val on = Layers.on(key)
             DropdownMenuItem(
                 text = { Text(label) },
@@ -427,15 +433,7 @@ fun FullMap(f: Flight, pulls: Int, onClose: () -> Unit) {
                     }
                 },
             )
-            radar?.let { r ->
-                Text(
-                    (if (r.box == WxMaps.WORLD) "Rain " else "Radar ") + time(r.frame, ZoneId.systemDefault()) +
-                        if (r.frame.atZone(ZoneId.systemDefault()).toLocalDate() != java.time.LocalDate.now()) ", " + dayLabel(r.frame.atZone(ZoneId.systemDefault()).toLocalDate()) else "",
-                    fontSize = 12.sp, color = C.secondary,
-                    modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(16.dp)
-                        .clip(CircleShape).background(C.card.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 4.dp),
-                )
-            }
+            MapFooter(f, radar, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(12.dp))
             Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (Debug.on) {
                     MapButton(Icons.Filled.BugReport, "Copy map debug info") {
@@ -449,6 +447,41 @@ fun FullMap(f: Flight, pulls: Int, onClose: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * What each thing on the full-screen map shows and how fresh it is: the moment (with its day; it can be past or
+ * future) and when it was fetched. One quiet line per layer that's showing.
+ */
+@Composable
+private fun MapFooter(f: Flight, radar: RadarImage?, modifier: Modifier) {
+    val z = ZoneId.systemDefault()
+    fun at(t: Instant) = dayLabel(t.atZone(z).toLocalDate()) + " " + time(t, z)
+    val lines = buildList {
+        radar?.let { r ->
+            val what = when (r.box) {
+                WxMaps.WORLD -> "Rain (NASA IMERG)"
+                ForecastRadar.BOX -> "Forecast radar (NOAA HRRR)"
+                else -> "Radar (RainViewer)"
+            }
+            add("$what: ${at(r.frame)} · fetched ${ago(r.fetched)}")
+        }
+        if (Layers.weather) f.routeWx?.takeIf { it.pts.isNotEmpty() }?.let { w ->
+            add("Route weather: ${at(w.pts.first().at)} – ${time(w.pts.last().at, z)} · fetched ${ago(w.fetched)}")
+        }
+        if (Layers.routes) Routes.cache[f.routeKey]?.let { c ->
+            val days = c.legs.mapNotNull { it.firstOrNull()?.t }.map { Instant.ofEpochSecond(it).atZone(z).toLocalDate() }
+            val span = if (days.isEmpty()) "none yet" else "${days.size} flights, ${dayLabel(days.min())} – ${dayLabel(days.max())}"
+            add("Past routes: $span · fetched ${ago(c.at)}")
+        }
+        f.updated?.let { add("Flight status · fetched ${ago(it)}") }
+        f.live?.takeIf { f.isAirborne }?.let { add("Position: ${at(it.at)} · ${ago(it.at)}") }
+    }
+    if (lines.isEmpty()) return
+    Text(
+        lines.joinToString("\n"), fontSize = 11.sp, lineHeight = 15.sp, color = C.secondary,
+        modifier = modifier.clip(RoundedCornerShape(10.dp)).background(C.card.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 6.dp),
+    )
 }
 
 /** A round map control, the same as the flight page's back and share buttons. */

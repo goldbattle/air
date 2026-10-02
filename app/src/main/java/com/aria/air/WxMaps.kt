@@ -127,11 +127,12 @@ object WxMaps {
 @Composable
 fun rememberWeatherMap(f: Flight, force: Int = 0): RadarImage? {
     val live = rememberRadar(f)
+    val forecast = rememberForecastRadar(f) // before takeoff, US routes, its own layer (off by default)
     var past by remember(f.id) { mutableStateOf(WxMaps.keyFor(f).let { WxMaps.cached(it) }) }
     LaunchedEffect(f.id, force, f.arrActual) {
         if (WxMaps.relevant(f, Instant.now(clock))) past = WxMaps.get(WxMaps.keyFor(f))
     }
-    return past?.takeIf { Layers.radar && WxMaps.relevant(f, Instant.now(clock)) } ?: live
+    return past?.takeIf { Layers.radar && WxMaps.relevant(f, Instant.now(clock)) } ?: forecast ?: live
 }
 
 /** [r] drawn once per world copy, so a world-wide picture also covers routes past ±180°. */
