@@ -103,8 +103,9 @@ class RadarImage(val bitmap: Bitmap, val box: GeoBox, val frame: Instant, val fe
 
 /**
  * Live precipitation radar under the route, from RainViewer's free Weather Maps API (personal use, Web Mercator
- * tiles up to zoom 7, Universal Blue colors only). Sends only tile coordinates. Kept in memory per flight only:
- * radar is about now, so nothing is stored with the flight.
+ * tiles up to zoom 7, Universal Blue colors only). Sends only tile coordinates. The latest picture per flight is
+ * also kept in the app's cache folder, so it's still there offline (on board) for a while; it's about now, so it isn't
+ * stored with the flight or in backups.
  */
 object Radar {
     const val TILE = 512 // RainViewer's large tiles: twice the detail at the same zoom
@@ -243,19 +244,49 @@ object Radar {
      */
     suspend fun get(f: Flight): RadarImage? {
         val now = Instant.now(clock)
-        if (!shown(f, now)) { cache.remove(f.id); return null }
+        if (!shown(f, now)) {
+            cache.remove(f.id)
+            dir?.let { d -> java.io.File(d, "${f.id}.png").delete(); java.io.File(d, "${f.id}.txt").delete() }
+            return null
+        }
         if (due(tried[f.id], now)) {
             tried[f.id] = now
-            runCatching { fetch(f) }.onFailure { Debug.note("radar for ${f.label} failed: $it") }.getOrNull()?.let { cache[f.id] = it }
+            runCatching { fetch(f) }.onFailure { Debug.note("radar for ${f.label} failed: $it") }.getOrNull()
+                ?.let { cache[f.id] = it; save(f.id, it) }
         }
         return cached(f)
     }
 
-    /** What's in memory for [f], without asking the network. An old picture is worse than none. */
+    /** How long a picture stays worth showing: through a stretch offline, but storms move, so not for hours. */
+    val KEEP: Duration = Duration.ofMinutes(90)
+    private var dir: java.io.File? = null
+
+    fun init(ctx: android.content.Context) { dir = java.io.File(ctx.cacheDir, "radar").apply { mkdirs() } }
+
+    /** What's in memory or on disk for [f], without asking the network. An old picture is worse than none. */
     fun cached(f: Flight): RadarImage? {
         val now = Instant.now(clock)
-        return cache[f.id]?.takeIf { shown(f, now) && Duration.between(it.fetched, now) < EVERY.multipliedBy(4) }
+        val r = cache[f.id] ?: load(f.id)?.also { cache[f.id] = it }
+        return r?.takeIf { shown(f, now) && Duration.between(it.fetched, now) < KEEP }
     }
+
+    private fun save(id: String, r: RadarImage) = runCatching {
+        val d = dir ?: return@runCatching
+        java.io.File(d, "$id.png").outputStream().use { r.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        java.io.File(d, "$id.txt").writeText(
+            listOf(r.box.lonMin, r.box.lonMax, r.box.latMin, r.box.latMax, r.frame.toEpochMilli(), r.fetched.toEpochMilli()).joinToString(","),
+        )
+    }
+
+    private fun load(id: String): RadarImage? = runCatching {
+        val d = dir ?: return null
+        val m = java.io.File(d, "$id.txt").readText().split(",")
+        val bmp = BitmapFactory.decodeFile(java.io.File(d, "$id.png").path) ?: return null
+        RadarImage(
+            bmp, GeoBox(m[0].toDouble(), m[1].toDouble(), m[2].toDouble(), m[3].toDouble()),
+            Instant.ofEpochMilli(m[4].toLong()), Instant.ofEpochMilli(m[5].toLong()),
+        )
+    }.getOrNull()
 
     private suspend fun fetch(f: Flight): RadarImage? = withContext(Dispatchers.IO) {
         val o = f.origin!!; val d = f.dest!!
