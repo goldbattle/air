@@ -50,7 +50,9 @@ class FlightTest : AirTest() {
     fun statusLines() {
         assertEquals("Upcoming" to Tone.Neutral, flight(hours(4)).status(NOW))
         // Past departure with no takeoff seen: don't claim it's flying.
-        assertEquals("Due to depart" to Tone.Info, flight(hours(-1)).status(NOW))
+        assertEquals("Due to depart" to Tone.Info, flight(min(-10)).status(NOW))
+        // Half an hour past with nothing newer (offline on board): most likely flying.
+        assertEquals("Probably in the air" to Tone.Info, flight(hours(-1)).status(NOW))
         val off = flight(hours(-1)).let { it.copy(depActual = it.depSched) }
         assertEquals("In the air" to Tone.Info, off.status(NOW))
         assertEquals("Arrived" to Tone.Good, flight(hours(-5).minus(min(30))).status(NOW))

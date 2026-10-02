@@ -336,8 +336,13 @@ fun Flight.status(now: Instant = Instant.now(clock)): Pair<String, Tone> {
         cancelled -> "Cancelled" to Tone.Bad
         diverted -> "Diverted" to Tone.Bad
         arrActual != null -> (if ((arrDelay ?: 0) >= 15) "Landed ${span(Duration.ofMinutes(arrDelay!!))} late" else "Landed") to Tone.Good
-        // Past the scheduled time with no takeoff seen (no signal, no status key): don't claim it's flying.
-        phase(now) == Phase.InFlight -> (if (isAirborne || tookOff != null) "In the air" else "Due to depart") to Tone.Info
+        // Past the scheduled time with no takeoff seen: don't claim it's flying at first. Half an hour on with nothing
+        // newer (offline on board, no signal), it most likely is; progress keeps running on the clock either way.
+        phase(now) == Phase.InFlight -> when {
+            isAirborne || tookOff != null -> "In the air"
+            now > depGuess.plus(Duration.ofMinutes(30)) && !airlineSaysNotDeparted(now) -> "Probably in the air"
+            else -> "Due to depart"
+        } to Tone.Info
         phase(now) == Phase.Arrival || phase(now) == Phase.Done -> "Arrived" to Tone.Good
         delay != null && delay >= 15 -> "Delayed ${span(Duration.ofMinutes(delay))}" to (if (delay >= 60) Tone.Bad else Tone.Warn)
         hasLiveStatus -> "On time" to Tone.Good
