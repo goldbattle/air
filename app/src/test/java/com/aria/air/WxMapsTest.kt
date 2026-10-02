@@ -19,6 +19,7 @@ class WxMapsTest : AirTest() {
         // Only finished flights, once IMERG has published that slot.
         assertFalse(WxMaps.relevant(flight(hours(2)), NOW))
         assertFalse(WxMaps.relevant(flight(hours(-5).minus(min(1))), NOW)) // just landed, middle 2.5 h ago: not published yet
+        assertFalse(WxMaps.relevant(flight(hours(-8)), NOW))  // middle 5.5 h ago: IMERG is still ~6 h behind
         assertTrue(WxMaps.relevant(flight(hours(-12)), NOW))
     }
 }

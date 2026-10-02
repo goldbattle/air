@@ -31,8 +31,9 @@ object WxMaps {
     val WORLD = GeoBox(-180.0, 180.0, -90.0, 90.0)
     /** Flights within the same 3 hours share a picture: storms don't move far in that time at this scale. */
     val SLOT: Duration = Duration.ofHours(3)
-    /** IMERG's delay; a slot newer than this isn't published yet. */
-    val LAG: Duration = Duration.ofHours(3)
+    /** IMERG's delay (its "early run" is about 6 h behind); a slot newer than this isn't published yet. */
+    val LAG: Duration = Duration.ofHours(7)
+    private val tried = ConcurrentHashMap<String, Instant>()
     private val fmt = DateTimeFormatter.ofPattern("yyyyMMddHH").withZone(ZoneOffset.UTC)
     private var dir: File? = null
     private val mem = ConcurrentHashMap<String, RadarImage>()
@@ -72,12 +73,23 @@ object WxMaps {
 
     /** The slot's picture, downloading it once if it isn't on the phone yet. */
     suspend fun get(key: String): RadarImage? = cached(key) ?: withContext(Dispatchers.IO) {
+        // A slot that isn't out yet comes back blank: don't keep that, try again in a while.
+        val now = Instant.now(clock)
+        if (tried[key]?.let { Duration.between(it, now) < Duration.ofMinutes(30) } == true) return@withContext null
+        tried[key] = now
         runCatching {
             val bytes = Radar.tile(url(WORLD, time(key), 2048, 1024))
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@runCatching null
+            if (blank(bmp)) { Debug.note("rain map $key not published yet"); return@runCatching null }
             file(key)?.writeBytes(bytes)
             RadarImage(soften(bmp), WORLD, time(key), Instant.now(clock)).also { mem[key] = it }
         }.onFailure { Debug.note("rain map $key failed: $it") }.getOrNull()
+    }
+
+    /** No rain anywhere on Earth means the slot isn't published (there's always rain somewhere). */
+    fun blank(b: Bitmap): Boolean {
+        val px = IntArray(b.width * b.height).also { b.getPixels(it, 0, b.width, 0, 0, b.width, b.height) }
+        return (px.indices step 7).none { px[it] ushr 24 != 0 }
     }
 
     /** IMERG paints light rain a solid green; let the lightest rates fade so it reads like the live radar. */
