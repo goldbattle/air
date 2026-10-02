@@ -260,7 +260,7 @@ private fun ImportTab() {
     val ctx = LocalContext.current
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Store.json().toByteArray()) } }
+        runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Store.exportJson().toByteArray()) } }
             .onSuccess { Toast.makeText(ctx, "Exported ${Store.flights.size} flights", Toast.LENGTH_SHORT).show() }
             .onFailure { Toast.makeText(ctx, "Export failed: ${it.message}", Toast.LENGTH_LONG).show() }
     }
@@ -334,6 +334,11 @@ private fun DebugTab() {
     }
     SectionHeader("Developer options")
     Group {
+        // Local builds aren't on GitHub: switch the update check off so it doesn't offer to "update" them.
+        SwitchCell("Automatic update check", Prefs.flag("updateCheck"), "Daily check against GitHub releases") {
+            Prefs.setFlag("updateCheck", it); Updater.schedule(ctx)
+        }
+        Hairline()
         Cell("Turn off developer options", color = C.red) {
             Debug.clear()
             Prefs.setFlag("dev", false)

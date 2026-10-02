@@ -48,6 +48,7 @@ class App : Application() {
         Guides.init(this)
         Store.init(this)
         Radar.init(this)
+        WxMaps.init(this)
         Routes.init(this)
         Mail.init(this)
         Debug.init(this)

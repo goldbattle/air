@@ -173,10 +173,10 @@ class RoutesTest : AirTest() {
     @Test
     fun selection() {
         val past = listOf(Pt(sfo.lat, sfo.lon), Pt(45.0, -95.0), Pt(bos.lat, bos.lon))
-        // Completed with a recorded path: that path, no arc, no past paths.
+        // Completed with a recorded path: that path, no arc; past paths still show for comparison.
         val done = flight(hours(-8)).copy(arrActual = NOW.minus(hours(3)), track = listOf(Pt(42.0, -100.0, 35000, 1)))
         done.paths(listOf(past), emptyList(), 3).let {
-            assertFalse(it.arc); assertEquals(3, it.flown.size); assertTrue(it.typical.isEmpty()); assertTrue(it.rest.isEmpty())
+            assertFalse(it.arc); assertEquals(3, it.flown.size); assertEquals(listOf(past), it.typical); assertTrue(it.rest.isEmpty())
         }
         // Completed without one: the arc.
         done.copy(track = emptyList()).paths(listOf(past), emptyList(), 3).let { assertTrue(it.arc); assertTrue(it.flown.isEmpty()) }

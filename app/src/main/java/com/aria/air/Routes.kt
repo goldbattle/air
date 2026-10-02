@@ -86,10 +86,10 @@ fun Flight.flownPath(landed: Boolean): List<Pt> {
 fun Flight.paths(fetched: List<List<Pt>>, others: List<Flight>, max: Int, now: Instant = Instant.now(clock)): MapPaths {
     val landed = arrActual != null || phase(now) >= Phase.Arrival
     val flown = flownPath(landed)
-    if (landed) return MapPaths(emptyList(), flown.isEmpty(), flown, emptyList())
     val mine = others.filter { it.id != id && it.track.isNotEmpty() && it.phase(now) == Phase.Done && (it.code == code || it.from == from && it.to == to) }
         .sortedWith(compareByDescending<Flight> { it.code == code }.thenByDescending { it.track.last().t }).map { it.flownPath(true) }
     val typical = (fetched + mine).take(max)
+    if (landed) return MapPaths(typical, flown.isEmpty(), flown, emptyList())
     val d = dest
     val rest = if (flown.isEmpty() || d == null) emptyList() else
         flown.last().let { p -> greatCircle(p.lat, p.lon, d.lat, d.lon, 32).map { Pt(it.first, it.second) } }
@@ -147,8 +147,8 @@ object Routes {
         File(f.path + ".tmp").apply { writeText(j.toString()) }.renameTo(f)
     }
 
-    /** Only for flights still to fly, once a day per flight number, and after a miss not again for an hour. */
-    fun due(f: Flight, now: Instant): Boolean = !f.cancelled && f.phase(now) < Phase.Arrival &&
+    /** Once a day per flight number (finished flights too), and after a miss not again for an hour. */
+    fun due(f: Flight, now: Instant): Boolean = !f.cancelled &&
         cache[f.routeKey]?.let { Duration.between(it.at, now) >= Duration.ofDays(1) } != false &&
         lastTry[f.routeKey]?.let { Duration.between(it, now) >= Duration.ofHours(1) } != false
 
@@ -202,7 +202,38 @@ object Routes {
         val recent = hex.flatMap { h ->
             runCatching { legsFrom(Api.get("https://adsb.lol/data/traces/${h.takeLast(2)}/trace_full_$h.json"), cs, f) }.getOrDefault(emptyList())
         }
-        (recent + earlierDays(f, cs)).filter { Math.abs(it.first().t - ours) > 3 * 3600 }.sortedByDescending { it.first().t }
+        val found = (recent + earlierDays(f, cs)).filter { Math.abs(it.first().t - ours) > 3 * 3600 }
+        // FlightAware (with a key) as the fallback: it keeps every flight's track for about ten days.
+        (found.ifEmpty { flightAware(f, ours) }).sortedByDescending { it.first().t }
+    }
+
+    /**
+     * Recent runs of the flight number on this route from FlightAware: its list of the last days' flights (one request),
+     * then the track of up to one (three with "All recent routes") finished one that isn't ours.
+     */
+    private fun flightAware(f: Flight, ours: Long): List<List<Pt>> {
+        val key = Prefs.aeroKey.takeIf { it.isNotBlank() } ?: return emptyList()
+        val head = mapOf("x-apikey" to key)
+        return runCatching {
+            Api.countLookup()
+            val list = JSONObject(Api.get("https://aeroapi.flightaware.com/aeroapi/flights/${Api.callsign(f.airline, f.number)}", head))
+                .optJSONArray("flights") ?: return@runCatching emptyList()
+            val done = (0 until list.length()).map { list.getJSONObject(it) }.filter { j ->
+                j.optJSONObject("origin")?.optString("code_iata") == f.from && j.optJSONObject("destination")?.optString("code_iata") == f.to &&
+                    j.optString("actual_on").let { it.isNotEmpty() && it != "null" } &&
+                    runCatching { Math.abs(Instant.parse(j.getString("scheduled_out")).epochSecond - ours) > 3 * 3600 }.getOrDefault(false)
+            }
+            done.take(if (Prefs.flag(Layers.ROUTES_ALL, false)) 3 else 1).mapNotNull { j ->
+                runCatching {
+                    Api.countLookup()
+                    val pos = JSONObject(Api.get("https://aeroapi.flightaware.com/aeroapi/flights/${j.getString("fa_flight_id")}/track", head))
+                        .getJSONArray("positions")
+                    thin((0 until pos.length()).map { pos.getJSONObject(it) }.map { p ->
+                        Pt(p.getDouble("latitude"), p.getDouble("longitude"), p.optInt("altitude") * 100, Instant.parse(p.getString("timestamp")).epochSecond)
+                    })
+                }.getOrNull()?.takeIf { it.size >= 2 }
+            }
+        }.getOrDefault(emptyList())
     }
 
     /**
@@ -237,7 +268,7 @@ object Routes {
     /** For the flight on screen only: fetches recent paths when [due] ([force] = the refresh button) and caches them. */
     suspend fun update(f: Flight, force: Boolean = false) {
         val now = Instant.now(clock)
-        if (!(if (force) !f.cancelled && f.phase(now) < Phase.Arrival else due(f, now))) return
+        if (!(if (force) !f.cancelled else due(f, now))) return
         lastTry[f.routeKey] = now
         val legs = runCatching { fetch(f) }.getOrDefault(emptyList())
         if (legs.isEmpty()) return

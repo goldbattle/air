@@ -35,6 +35,12 @@ object Land {
 
 class MapRoute(val from: Airport, val to: Airport, val highlight: Boolean = false)
 
+/** Where the map looks: its center, pixels per degree of latitude, and the longitude squeeze at that latitude. */
+data class Camera(val lon: Double, val lat: Double, val scale: Double, val kx: Double) {
+    /** What's on a [w] by [h] screen. */
+    fun box(w: Float, h: Float) = GeoBox(lon - w / 2 / (kx * scale), lon + w / 2 / (kx * scale), lat - h / 2 / scale, lat + h / 2 / scale)
+}
+
 /**
  * Equirectangular map. [focus] zooms to the routes (flight detail); otherwise the whole world (passport).
  * Routes are drawn as great circles; [plane] adds the live aircraft pointing along its track.
@@ -56,6 +62,11 @@ fun WorldMap(
     over: (DrawScope.(x: (Double) -> Float, y: (Double) -> Float) -> Unit)? = null,
     /** Flown, planned and past paths of one flight (Routes.kt); null draws [routes] as plain arcs. */
     paths: MapPaths? = null,
+    /** Color of other runs' paths. */
+    pastRoute: Color = C.secondary.copy(alpha = 0.55f),
+    /** Look here instead of fitting the routes (the zoomable full-screen map); [onFit] reports the fitted view. */
+    camera: Camera? = null,
+    onFit: ((Camera) -> Unit)? = null,
 ) {
     val arcs = remember(routes) { routes.map { greatCircle(it.from.lat, it.from.lon, it.to.lat, it.to.lon) } }
     val ref = arcs.firstOrNull()?.first()?.second ?: 0.0
@@ -77,8 +88,10 @@ fun WorldMap(
         // Fit, then grow the short side so the map fills the box without distortion.
         val cyf = if (focus) centerY else 0.5f
         val usableH = size.height * 2 * minOf(cyf, 1 - cyf)
-        val scale = minOf(size.width / ((lonMax - lonMin) * kx), usableH / (latMax - latMin))
-        val cLon = (lonMin + lonMax) / 2; val cLat = (latMin + latMax) / 2
+        val fitScale = minOf(size.width / ((lonMax - lonMin) * kx), usableH / (latMax - latMin))
+        onFit?.invoke(Camera((lonMin + lonMax) / 2, (latMin + latMax) / 2, fitScale, kx))
+        val scale = camera?.scale ?: fitScale
+        val cLon = camera?.lon ?: ((lonMin + lonMax) / 2); val cLat = camera?.lat ?: ((latMin + latMax) / 2)
         fun x(lon: Double) = (size.width / 2 + (lon - cLon) * kx * scale).toFloat()
         fun y(lat: Double) = (size.height * cyf - (lat - cLat) * scale).toFloat()
 
@@ -104,9 +117,10 @@ fun WorldMap(
             drawPath(p, color, style = Stroke(width, cap = StrokeCap.Round,
                 pathEffect = if (dash) PathEffect.dashPathEffect(floatArrayOf(2.2f * width, 2f * width)) else null))
         }
-        // Past paths faint and thin behind; the plan dashed (from the plane on once flying); what was flown solid.
+        // Other runs of this flight thin, gray and dashed behind; the plan dashed in the accent (from the plane on once
+        // flying); what this flight actually flew solid on top.
         if (paths != null && extra != null) {
-            extra.drop(2).forEach { stroke(it, line.copy(alpha = 0.22f), 1.4.dp.toPx()) }
+            extra.drop(2).forEach { stroke(it, pastRoute, 1.3.dp.toPx(), dash = true) }
             if (paths.arc) arcs.forEach { stroke(it, line.copy(alpha = 0.75f), w * 0.8f, dash = true) }
             stroke(extra[1], line.copy(alpha = 0.5f), w * 0.7f, dash = true)
             stroke(extra[0], line, w)

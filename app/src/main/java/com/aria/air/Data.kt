@@ -446,6 +446,9 @@ object Store {
     fun json(list: List<Flight> = flights): String =
         JSONObject().put("app", "air").put("version", 1).put("name", Prefs.name).put("flights", JSONArray(list.map { it.toJson() })).toString()
 
+    /** A backup: the flights plus the rain maps of their flights (WxMaps), so a restore looks the same. */
+    fun exportJson(): String = JSONObject(json()).put("wxmaps", WxMaps.export(flights)).toString()
+
     /** Write to a temp file and rename, so a crash mid-write never loses the file. */
     private fun save() = synchronized(this) {
         val tmp = File(file.path + ".tmp")
@@ -476,6 +479,7 @@ object Store {
     fun import(text: String): Int {
         // A backup also carries the traveler's name; take it if none is set yet.
         runCatching { JSONObject(text).optString("name") }.getOrNull()?.takeIf { it.isNotBlank() && Prefs.name.isBlank() }?.let { Prefs.name = it }
+        runCatching { WxMaps.import(JSONObject(text).optJSONObject("wxmaps")) }
         val known = flights.map { it.id }.toSet()
         val add = parse(text).filter { it.id !in known && findSame(it) == null }
         flights.addAll(add)

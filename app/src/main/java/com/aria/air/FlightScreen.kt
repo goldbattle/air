@@ -67,7 +67,9 @@ fun FlightScreen(id: String) {
     val now = rememberNow()
     val phase = f.phase(now)
     var shown by remember(id) { mutableStateOf(if (phase == Phase.Done) Phase.Arrival else phase) }
+    // Only a pull shows the spinner; the automatic refreshes while the page is open run quietly.
     var refreshing by remember { mutableStateOf(false) }
+    var pulls by remember { mutableIntStateOf(0) } // each pull also fetches the weather map and past routes
     var edit by remember { mutableStateOf<EditRequest?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -76,12 +78,14 @@ fun FlightScreen(id: String) {
         while (true) {
             val cur = Store.get(id) ?: break
             if (cur.phase() == Phase.Done && !cur.maybeLive && cur.updated != null) break
-            refreshing = true
-            refreshNow(ctx, id) { refreshing = false }.join()
+            refreshNow(ctx, id).join()
             if (Store.get(id)?.let { it.phase() in Phase.Departure..Phase.Arrival || it.maybeLive } != true) break
             delay(60_000)
         }
     }
+
+    // Past routes of this flight number, upcoming or finished (once a day; Routes.kt).
+    LaunchedEffect(id) { Store.get(id)?.let { Routes.update(it) } }
 
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     // Once the map scrolls away, the floating buttons get a solid bar with the flight number, like iOS.
@@ -89,10 +93,10 @@ fun FlightScreen(id: String) {
     Box(Modifier.fillMaxSize().background(C.bg)) {
         @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            refreshing, { refreshing = true; refreshNow(ctx, id, force = true) { refreshing = false } }, Modifier.fillMaxSize(),
+            refreshing, { refreshing = true; pulls++; refreshNow(ctx, id, force = true) { refreshing = false } }, Modifier.fillMaxSize(),
         ) {
         LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 32.dp)) {
-            item("map") { MapHeader(f) }
+            item("map") { MapHeader(f, pulls) }
             item("body") {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     Spacer(Modifier.height(8.dp))
@@ -138,10 +142,6 @@ fun FlightScreen(id: String) {
                 if (solid) "${f.label} · ${f.from} → ${f.to}" else "", fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
             )
-            if (refreshing) Box(Modifier.size(40.dp).clip(CircleShape).background(C.card), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = C.blue)
-            } else FloatingButton(Icons.Filled.Refresh, "Refresh") { refreshing = true; refreshNow(ctx, id, force = true) { refreshing = false } }
-            Spacer(Modifier.width(8.dp))
             FloatingButton(Icons.Filled.IosShare, "Share") { share(ctx, f) }
         }
     }
@@ -189,19 +189,19 @@ private fun LegBar(f: Flight, legs: List<Flight>) = Group {
 }
 
 @Composable
-private fun MapHeader(f: Flight) {
+private fun MapHeader(f: Flight, pulls: Int) {
     val o = f.origin; val d = f.dest
     var full by remember { mutableStateOf(false) } // full-screen map (Radar.kt)
-    if (full) FullMap(f) { full = false }
+    if (full) FullMap(f, pulls) { full = false }
     // The map runs behind the title; the route sits in the upper part and a gradient keeps the title readable.
     Box(Modifier.fillMaxWidth().clickable(interactionSource = null, indication = null) { full = true }) {
         if (o != null && d != null) {
-            val radar = rememberRadar(f)
+            val radar = rememberWeatherMap(f, pulls) // live radar, or the rain during the flight (WxMaps.kt)
             val wx = f.routeWx?.takeIf { Layers.weather }
             WorldMap(
                 listOf(MapRoute(o, d, highlight = true)), Modifier.matchParentSize(), focus = true, centerY = 0.36f,
                 plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
-                under = radar?.let { r -> { x, y -> drawRadar(r, x, y) } }, // radar layer (Radar.kt)
+                under = radar?.let { r -> { x, y -> drawWeatherMap(r, x, y, 0.5f) } }, // radar layer
                 over = wx?.let { w -> { x, y -> drawRouteWx(w, o.lon, x, y) } }, // route weather layer (RouteWx.kt)
             )
         }

@@ -8,6 +8,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -130,12 +132,35 @@ fun DrawScope.drawRouteWx(w: RouteWx, refLon: Double, x: (Double) -> Float, y: (
     }
 }
 
-/** A quiet line under the schedule when the route has weather worth knowing about. */
+/** The weather icon for a point, like a forecast map: storms (with lightning when strongly convective), snow, rain, cloud, sun. */
+fun RoutePt.icon(): String = when (sky()) {
+    Sky.Storms -> if ((cape ?: 0.0) >= 1500 || code in 96..99) "⛈️" else "🌩️"
+    Sky.Snow -> "🌨️"
+    Sky.Rain -> if (mm >= 4) "🌧️" else "🌦️"
+    Sky.Clear -> if (cloud >= 70) "☁️" else if (cloud >= 30) "⛅" else "☀️"
+}
+
+/** Every point's weather as an icon on a small round chip, for the full-screen map. */
+fun DrawScope.drawRouteWxIcons(w: RouteWx, refLon: Double, x: (Double) -> Float, y: (Double) -> Float) {
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 15.dp.toPx(); textAlign = android.graphics.Paint.Align.CENTER
+    }
+    w.pts.forEach { p ->
+        var lon = p.lon
+        while (lon - refLon > 180) lon -= 360
+        while (lon - refLon < -180) lon += 360
+        val c = Offset(x(lon), y(p.lat) - 16.dp.toPx()) // just above the line
+        drawCircle(Color.White.copy(alpha = 0.85f), 12.dp.toPx(), c)
+        drawIntoCanvas { it.nativeCanvas.drawText(p.icon(), c.x, c.y + paint.textSize * 0.35f, paint) }
+    }
+}
+
+/** A quiet line under the schedule: the worst weather along the route, or that it's clear. */
 @Composable
 fun RouteWxLine(f: Flight) {
     val w = f.routeWx ?: return
-    val s = w.summary(f.fromTz) ?: return
-    val icon = w.pts.maxOf { it.sky() }.icon
+    val s = w.summary(f.fromTz) ?: "Clear along the route"
+    val icon = w.pts.maxOf { it.sky() }.icon.ifEmpty { "☀️" }
     Text(
         "$icon $s", fontSize = 13.sp, color = C.secondary, textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp),

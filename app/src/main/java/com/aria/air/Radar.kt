@@ -1,5 +1,10 @@
 package com.aria.air
 
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
@@ -292,9 +297,13 @@ object Radar {
         )
     }.getOrNull()
 
-    private suspend fun fetch(f: Flight): RadarImage? = withContext(Dispatchers.IO) {
+    private suspend fun fetch(f: Flight): RadarImage? {
         val o = f.origin!!; val d = f.dest!!
-        val b = box(greatCircle(o.lat, o.lon, d.lat, d.lon))
+        return fetchBox(box(greatCircle(o.lat, o.lon, d.lat, d.lon)))
+    }
+
+    /** The latest radar over any box: the route's, or what's on screen when zoomed in (sharper tiles). */
+    suspend fun fetchBox(b: GeoBox): RadarImage? = withContext(Dispatchers.IO) {
         val (frame, at) = frame() ?: return@withContext null
         val p = plan(b)
         val tiles = Array(p.nx * p.ny) { k ->
@@ -340,21 +349,45 @@ fun drawRadar(c: android.graphics.Canvas, r: RadarImage, x: (Double) -> Float, y
     )
 }
 
-/** The route map full screen, with the same layers and the layers button; opened by tapping the flight page's map. */
+/**
+ * The route map full screen: pinch to zoom and drag to pan (double-tap to fit the route again), the same layers and
+ * the layers button. Zooming enlarges the radar picture already fetched (no new requests); weather along the route
+ * shows as icons. Opened by tapping the flight page's map.
+ */
 @Composable
-fun FullMap(f: Flight, onClose: () -> Unit) {
+fun FullMap(f: Flight, pulls: Int, onClose: () -> Unit) {
     val o = f.origin ?: return; val d = f.dest ?: return
-    val radar = rememberRadar(f)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val radar = rememberWeatherMap(f, pulls)
     val wx = f.routeWx?.takeIf { Layers.weather }
     val arc = remember(o, d) { greatCircle(o.lat, o.lon, d.lat, d.lon) }
     val pill = C.card.copy(alpha = 0.9f).toArgb(); val ink = C.label.toArgb()
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    val fit = remember { arrayOfNulls<Camera>(1) } // what the map fits to, reported while drawing
+    var size by remember { mutableStateOf(IntSize.Zero) }
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Box(Modifier.fillMaxSize().background(C.sea)) {
+        Box(
+            Modifier.fillMaxSize().background(C.sea).onSizeChanged { size = it }
+                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { camera = null }) }
+                .pointerInput(Unit) {
+                    detectTransformGestures { centroid, pan, zoom, _ ->
+                        val c = camera ?: fit[0] ?: return@detectTransformGestures
+                        val base = fit[0]?.scale ?: c.scale
+                        val s = (c.scale * zoom).coerceIn(base * 0.6, base * 60)
+                        val w = size.width / 2f; val h = size.height / 2f
+                        // Keep the point under the fingers in place while zooming, then follow the drag.
+                        val lon = c.lon + (centroid.x - w) / (c.kx * c.scale) - (centroid.x - w) / (c.kx * s) - pan.x / (c.kx * s)
+                        val lat = c.lat - (centroid.y - h) / c.scale + (centroid.y - h) / s + pan.y / s
+                        camera = Camera(lon, lat.coerceIn(-80.0, 80.0), s, c.kx)
+                    }
+                },
+        ) {
             WorldMap(
                 listOf(MapRoute(o, d, highlight = true)), Modifier.fillMaxSize(), focus = true, plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
-                under = radar?.let { r -> { x, y -> drawRadar(r, x, y, alpha = 0.65f) } },
+                camera = camera, onFit = { fit[0] = it },
+                under = radar?.let { r -> { x, y -> drawWeatherMap(r, x, y, 0.65f) } },
                 over = { x, y ->
-                    wx?.let { drawRouteWx(it, o.lon, x, y) }
+                    wx?.let { drawRouteWxIcons(it, o.lon, x, y) }
                     // Airport codes as small pills beside the ends, on the outside of the line.
                     val leftFirst = x(arc.first().second) <= x(arc.last().second)
                     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -374,13 +407,34 @@ fun FullMap(f: Flight, onClose: () -> Unit) {
                 },
             )
             Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (Debug.on) {
+                    MapButton(Icons.Filled.BugReport, "Copy map debug info") {
+                        Debug.copy(ctx, Debug.flightReport(f) + "\n" + mapReport(f, radar, camera, fit[0], size), "Map debug info")
+                    }
+                    Spacer(Modifier.width(10.dp))
+                }
                 LayersButton()
                 Spacer(Modifier.width(10.dp))
-                Box(
-                    Modifier.size(40.dp).clip(CircleShape).background(C.card.copy(alpha = 0.9f)).clickable(onClick = onClose),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Close, "Close", tint = C.label, modifier = Modifier.size(20.dp)) }
+                MapButton(Icons.Filled.Close, "Close", onClose)
             }
         }
     }
+}
+
+@Composable
+private fun MapButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) = Box(
+    Modifier.size(40.dp).clip(CircleShape).background(C.card.copy(alpha = 0.9f)).clickable(onClick = onClick),
+    contentAlignment = Alignment.Center,
+) { Icon(icon, label, tint = C.label, modifier = Modifier.size(20.dp)) }
+
+/** What the full-screen map is showing, for the debug report. */
+private fun mapReport(f: Flight, radar: RadarImage?, camera: Camera?, fit: Camera?, size: IntSize) = buildString {
+    val now = Instant.now(clock)
+    appendLine("== map  ${size.width}x${size.height}  camera ${camera ?: "fit"}  fit $fit")
+    appendLine("layers radar=${Layers.radar} weather=${Layers.weather} routes=${Prefs.flag(Layers.ROUTES)} all=${Prefs.flag(Layers.ROUTES_ALL, false)}")
+    appendLine("live radar relevant=${Radar.relevant(f, now)}  rain map relevant=${WxMaps.relevant(f, now)} slot ${WxMaps.keyFor(f)}")
+    appendLine("radar ${radar?.let { "frame ${it.frame} fetched ${it.fetched} box ${it.box} ${it.bitmap.width}x${it.bitmap.height}" } ?: "none"}")
+    appendLine("route weather ${f.routeWx?.let { w -> "fetched ${w.fetched}: " + w.pts.joinToString { "${it.sky()}/${it.code}/${it.mm}mm/cape ${it.cape}" } } ?: "none"}")
+    val p = f.mapPaths()
+    appendLine("paths: past ${p.typical.size} (${p.typical.joinToString { "${it.size} pts" }}), flown ${p.flown.size} pts, arc ${p.arc}, cached ${Routes.cache[f.routeKey]?.let { "${it.legs.size} at ${it.at}" } ?: "none"}")
 }
