@@ -1,6 +1,7 @@
 package com.aria.air
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
@@ -82,22 +83,26 @@ class MailTest {
 
     @Test
     fun queries() {
-        val q = MailQuery.gmail(1)
+        val q = MailQuery.gmail()
         assertTrue(q.startsWith("X-GM-RAW \"{from:united.com "))
         assertTrue(q.contains("subject:\\\"boarding pass\\\"")) // inner quotes escaped for IMAP
-        assertTrue(q.endsWith("-category:promotions\""))
-        assertTrue(MailQuery.gmail(501).startsWith("UID 501:* X-GM-RAW "))
-        val s = MailQuery.standard(1)
+        assertTrue(q.contains("\\\"record locator\\\"")) // body phrases too
+        assertFalse(q.contains("category:promotions"))     // some airlines' confirmations land in Promotions
+        val s = MailQuery.standard()
         assertTrue(s.startsWith("OR OR OR "))
         assertEquals(s.split("SUBJECT ").size - 2, Regex("\\bOR\\b").findAll(s).count()) // n terms, n-1 ORs
     }
 
     @Test
-    fun incrementalUids() {
-        assertEquals(1L, MailQuery.start(validity = 7, lastValidity = 0, lastUid = 0))     // first scan: everything
-        assertEquals(501L, MailQuery.start(validity = 7, lastValidity = 7, lastUid = 500)) // then only new mail
-        assertEquals(1L, MailQuery.start(validity = 8, lastValidity = 7, lastUid = 500))   // mailbox renumbered: all again
-        assertEquals(listOf(501L, 502L), MailQuery.fresh(listOf(502, 480, 501, 502), 501))  // "n:*" can return an older one
+    fun mergingAnAlreadySavedFlight() {
+        val d = LocalDate.of(2026, 10, 14)
+        val saved = Flight(airline = "DL", number = "400", date = d, from = "DTW", to = "PWM", seat = "14C")
+        val email = Found(airline = "DL", number = "400", date = d, from = "DTW", to = "PWM", dep = null, arr = null, seat = "22A", booking = "QWERTY")
+        assertEquals(listOf("confirmation"), mergeAdds(saved, email)) // the saved seat wins, so only the code is new
+        val merged = saved.fillFrom(saved.copy(seat = "22A", booking = "QWERTY"))
+        assertEquals("14C", merged.seat)
+        assertEquals("QWERTY", merged.booking)
+        assertEquals(emptyList<String>(), mergeAdds(merged, email))
     }
 
     @Test
@@ -147,7 +152,7 @@ class MailTest {
             assertTrue("X-GM-EXT-1" in im.caps())
             assertEquals("[Gmail]/All Mail", im.allMail())
             assertEquals(Imap.Box(7, 900), im.examine("[Gmail]/All Mail"))
-            assertEquals(listOf(12L, 34L), im.search(MailQuery.gmail(1)))
+            assertEquals(listOf(12L, 34L), im.search(MailQuery.gmail()))
             assertEquals(body, im.fetch("12", "BODY.PEEK[1]")[12L]!!["BODY[1]"])
         }
         assertTrue(sent.any { it.endsWith("EXAMINE \"[Gmail]/All Mail\"") })

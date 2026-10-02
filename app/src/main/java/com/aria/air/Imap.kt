@@ -31,7 +31,8 @@ class Imap(private val sock: Socket) : Closeable {
         val list by lazy { sexp(line, literals) }
     }
 
-    data class Box(val validity: Long, val uidNext: Long)
+    /** [exists]: how many emails the mailbox holds. */
+    data class Box(val validity: Long, val uidNext: Long, val exists: Long = 0)
 
     private val input = BufferedInputStream(sock.getInputStream())
     private val out = sock.getOutputStream()
@@ -93,7 +94,8 @@ class Imap(private val sock: Socket) : Closeable {
     fun examine(box: String): Box {
         val rs = cmd("EXAMINE ${quote(box)}")
         fun num(k: String) = rs.firstNotNullOfOrNull { Regex("\\[$k (\\d+)\\]",RegexOption.IGNORE_CASE).find(it.line) }?.groupValues?.get(1)?.toLong() ?: 0
-        return Box(num("UIDVALIDITY"), num("UIDNEXT"))
+        val exists = rs.firstNotNullOfOrNull { Regex("^\\* (\\d+) EXISTS", RegexOption.IGNORE_CASE).find(it.line) }?.groupValues?.get(1)?.toLong() ?: 0
+        return Box(num("UIDVALIDITY"), num("UIDNEXT"), exists)
     }
 
     fun search(criteria: String): List<Long> = cmd("UID SEARCH $criteria").filter { it.line.startsWith("* SEARCH", true) }
@@ -286,28 +288,26 @@ object MailQuery {
         "navan.com", "concur.com", "egencia.com", "tripit.com",
     )
     private val subjects = listOf(
-        "itinerary", "confirmation", "confirmed", "e-ticket", "eticket", "receipt", "reservation", "booking", "\"trip to\"",
-        "\"boarding pass\"", "\"check in\"", "flight",
+        "itinerary", "confirmation", "confirmed", "e-ticket", "eticket", "ticket", "receipt", "reservation", "booking", "trip",
+        "travel", "\"boarding pass\"", "\"check in\"", "check-in", "flight", "fwd", "fw",
+    )
+    /** Phrases in the body of a booking, for confirmations from senders not listed and forwarded ones. */
+    private val phrases = listOf(
+        "\"confirmation code\"", "\"confirmation number\"", "\"record locator\"", "\"booking reference\"",
+        "\"reservation code\"", "\"ticket number\"", "\"e-ticket\"", "\"flight confirmation\"", "itinerary",
     )
 
     /**
-     * Gmail search: mail from an airline or travel site, or with a booking-like subject, that mentions a flight.
-     * Promotions are skipped (that's where airline deals land); the parser weeds out whatever else slips through.
+     * Gmail search over the whole mailbox: mail from an airline or travel site, with a booking-like subject, or with
+     * booking phrases in it, that mentions a flight. Deliberately broad (Promotions included, where some airlines'
+     * confirmations land); the parser drops whatever has no flight in it.
      */
-    val gmail = "{" + (senders.map { "from:$it" } + subjects.map { "subject:$it" }).joinToString(" ") + "} " +
-        "{flight flights \"boarding pass\" \"e-ticket\"} -category:promotions"
-
-    private fun range(from: Long) = if (from > 1) "UID $from:* " else ""
+    val gmail = "{" + (senders.map { "from:$it" } + subjects.map { "subject:$it" } + phrases).joinToString(" ") + "} " +
+        "{flight flights \"boarding pass\" \"e-ticket\" departure departs}"
 
     /** UID SEARCH criteria for Gmail (its X-GM-RAW extension takes the query as typed in Gmail's search box). */
-    fun gmail(from: Long) = range(from) + "X-GM-RAW " + Imap.quote(gmail)
+    fun gmail() = "X-GM-RAW " + Imap.quote(gmail)
 
     /** Any other IMAP server: booking-like subjects. */
-    fun standard(from: Long) = range(from) + subjects.map { "SUBJECT " + Imap.quote(it.trim('"')) }.reduce { a, b -> "OR $a $b" }
-
-    /** First UID to look at: everything the first time, or if the server renumbered the mailbox (UIDVALIDITY changed). */
-    fun start(validity: Long, lastValidity: Long, lastUid: Long) = if (validity == lastValidity) lastUid + 1 else 1L
-
-    /** "UID n:*" always includes the newest message even when it's below n, so drop what was already seen. */
-    fun fresh(uids: List<Long>, start: Long) = uids.filter { it >= start }.distinct().sorted()
+    fun standard() = subjects.map { "SUBJECT " + Imap.quote(it.trim('"')) }.reduce { a, b -> "OR $a $b" }
 }

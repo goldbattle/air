@@ -145,12 +145,7 @@ suspend fun addFlight(ctx: Context, f: Flight, asCopy: Boolean = false): String 
     }
     // Already there (say from a byAir import): fill in what this document adds instead of duplicating it.
     Store.findSame(f)?.let { old ->
-        Store.upsert(
-            old.copy(
-                seat = old.seat.ifEmpty { f.seat }, booking = old.booking.ifEmpty { f.booking },
-                depSched = old.depSched ?: f.depSched, arrSched = old.arrSched ?: f.arrSched, work = old.work || f.work,
-            ),
-        )
+        Store.upsert(old.fillFrom(f))
         return old.id
     }
     Store.upsert(f)
@@ -161,7 +156,20 @@ suspend fun addFlight(ctx: Context, f: Flight, asCopy: Boolean = false): String 
     return f.id
 }
 
-private fun Found.toFlight(route: List<String>, friend: String, work: Boolean): Flight? {
+/** [this] with the details it's missing taken from [f], the same flight read from another document. */
+fun Flight.fillFrom(f: Flight) = copy(
+    seat = seat.ifEmpty { f.seat }, booking = booking.ifEmpty { f.booking },
+    depSched = depSched ?: f.depSched, arrSched = arrSched ?: f.arrSched, work = work || f.work,
+)
+
+/** The details merging [f] would add to [old]: "seat", "confirmation", "times". */
+fun mergeAdds(old: Flight, f: Found): List<String> = listOfNotNull(
+    "seat".takeIf { old.seat.isEmpty() && f.seat.isNotEmpty() },
+    "confirmation".takeIf { old.booking.isEmpty() && f.booking.isNotEmpty() },
+    "times".takeIf { old.depSched == null && f.dep != null || old.arrSched == null && f.arr != null },
+)
+
+fun Found.toFlight(route: List<String>, friend: String, work: Boolean): Flight? {
     val d = date ?: return null
     val from = from ?: route.firstOrNull() ?: return null
     val to = to ?: route.lastOrNull()?.takeIf { it != from } ?: return null

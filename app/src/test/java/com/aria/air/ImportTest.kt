@@ -17,6 +17,24 @@ class ImportTest : AirTest() {
     private fun t(h: Int, m: Int) = LocalTime.of(h, m)
 
     @Test
+    fun trackingLinksAndFooterNoise() {
+        // Plain-text airline emails are full of tracking links and encoded runs that read like flight numbers.
+        val email = """
+            Your trip confirmation: TESTAB
+            View trip: https://e.example.com/c?_ri_=X0Gzc2X%3DSH8PW3V2CI9BL0&_ei_=EolaGGF4SNMvxFF7KucKuWNhjeSKZKbO
+            Thu, Nov 5, 2026
+            DL 400  Detroit (DTW) to Portland (PWM)
+            Departs 10:25 AM  Arrives 12:22 PM   Seat 14C
+            Track at www.example.com/t/KP2JQ9GA1 or text TRIP to 12345
+            Ref CI 9 · BL 0 · O7 4
+        """.trimIndent()
+        assertEquals(listOf("DL 400"), parse(email).map { it.label })
+        // A connection on the same airline stays even when its airports didn't parse.
+        val two = parse("Thu, Nov 5, 2026\nDL 400 DTW to PWM 10:25 AM 12:22 PM\nThu, Nov 5, 2026\nConnecting DL 1180 at 2:10 PM")
+        assertEquals(listOf("DL 400", "DL 1180"), two.map { it.label })
+    }
+
+    @Test
     fun confirmationEmail() {
         val email = """
             Your trip confirmation: TESTAB

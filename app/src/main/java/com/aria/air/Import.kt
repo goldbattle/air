@@ -189,8 +189,16 @@ object Importer {
         return words.joinToString(" ") { w -> if (w.length > 1 && w == w.uppercase()) w.lowercase().replaceFirstChar { it.uppercase() } else w }
     }
 
+    /**
+     * Links and long encoded runs (email tracking URLs, base64, CSS leftovers) are full of things like "YQ4" or "SH8"
+     * that read as flight numbers. Blank them out, keeping the text's length so nothing else shifts.
+     */
+    private val noise = Regex("(?i)(?:https?://|www\\.)\\S+|(?<!\\S)(?=\\S*[%=&?_+/])\\S{30,}")
+
+    fun denoise(text: String): String = noise.replace(text) { " ".repeat(it.value.length) }
+
     fun parse(text: String, today: LocalDate = LocalDate.now()): List<Found> {
-        val t = clean(text)
+        val t = denoise(clean(text))
         val flights = flightRe.findAll(t).filter { m ->
             val code = m.groupValues[1]
             code !in setOf("AM", "PM") && Db.airline(code) != null
@@ -198,6 +206,8 @@ object Importer {
         val allDates = dates(t, today)
         val booking = bookingRe.find(t)?.groupValues?.get(1).orEmpty()
         val out = LinkedHashMap<String, Found>()
+        val routed = HashSet<String>() // flights whose airports sit next to their own number, not borrowed nearby
+        var claimed = 0 // text up to here belongs to an earlier flight (its details came after its number)
         fun airports(s: String) = codeRe.findAll(s).map { it.groupValues[1] }
             .filter { it !in notAirports && Db.airport(it) != null }.distinct().take(2).toList()
         fun cities(s: String) = cityRe.findAll(s).mapNotNull { Db.airportForCity(it.groupValues[1], it.groupValues[2])?.iata }
@@ -218,8 +228,9 @@ object Importer {
             // next flight's block; "before" starts at this flight's date. Use whichever side is more complete.
             val afterEnd = allDates.firstOrNull { it.first in m.range.last + 1 until next && it.second != date }?.first ?: next
             val after = t.substring(start, afterEnd)
-            val before = t.substring(maxOf(prevEnd, lastDate?.first ?: (start - 160), start - 600), start)
+            val before = t.substring(minOf(start, maxOf(claimed, prevEnd, lastDate?.first ?: (start - 160), start - 600)), start)
             val seg = if (completeness(before) > completeness(after)) before else after
+            claimed = if (seg === after && completeness(after) > 0) afterEnd else start
             val codes = codesIn(seg).takeIf { it.size == 2 } ?: airports(t.substring(maxOf(prevEnd, start - 160), afterEnd))
             val tm = times(seg)
             val from = codes.getOrNull(0); val to = codes.getOrNull(1)
@@ -236,8 +247,14 @@ object Importer {
             val key = "${f.label}|${f.date}"
             val prev = out[key]
             if (prev == null || score(f) > score(prev)) out[key] = f
+            if (codesIn(seg).size == 2) routed += key
         }
-        return out.values.toList()
+        // When some flights come with both airports, a bare number next to nothing ("CI 9" in a footer) isn't one,
+        // unless it's on the same airline as a complete flight (a connection whose airports didn't parse).
+        val complete = out.filterKeys { it in routed }
+        val airlines = complete.values.map { it.airline }.toSet()
+        return if (complete.isEmpty()) out.values.toList()
+        else out.filter { (k, f) -> k in routed || f.airline in airlines && f.date != null }.values.toList()
     }
 
     private fun score(f: Found) = listOf(f.date, f.from, f.to, f.dep, f.arr).count { it != null } + (if (f.seat.isNotEmpty()) 1 else 0)

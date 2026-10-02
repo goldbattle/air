@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.format.DateTimeFormatter
 
 private val SCHEDULE = listOf(0 to "Manual", 1 to "Weekly", 2 to "2 weeks", 4 to "4 weeks")
 
@@ -118,7 +119,10 @@ fun MailScreen() {
                     if (i > 0) Hairline()
                     Cell(
                         a.email, chevron = true,
-                        subtitle = a.error.ifEmpty { if (a.scanned > 0) "Scanned ${ago(Instant.ofEpochMilli(a.scanned))}" else "Not scanned yet" },
+                        subtitle = a.error.ifEmpty {
+                            if (a.scanned > 0) "Scanned ${ago(Instant.ofEpochMilli(a.scanned))}" + (a.summary.takeIf { it.isNotEmpty() }?.let { "\n$it" } ?: "")
+                            else "Not scanned yet"
+                        },
                     ) { open = a; test = null }
                 }
                 Hairline()
@@ -148,7 +152,7 @@ fun MailScreen() {
                 Cell("Dismissed", "$dismissed")
                 if (dismissed > 0) {
                     Hairline()
-                    Cell("Suggest dismissed emails again", color = C.blue) { Mail.restoreDismissed() }
+                    Cell("Show dismissed emails again", color = C.blue) { Mail.restoreDismissed() }
                 }
             }
             Footnote("Emails you import or dismiss are remembered and never suggested again.")
@@ -175,18 +179,22 @@ fun MailScreen() {
     }
 }
 
-/** Emails with flights in them: tick the ones to import, then review them one by one. */
+/** Emails with flights in them: new ones to tick and review, and ones already saved to merge or dismiss. */
 @Composable
 fun MailFoundScreen() {
     val ctx = LocalContext.current
     val list = Mail.suggestions
+    val dupes = Mail.duplicates
     val picked = Mail.picked.filter { k -> list.any { it.key == k } }
+    val dismissed = Mail.hits.count { it.state == "d" }
     var confirmAll by remember { mutableStateOf(false) }
 
     Page(
         "Found in Email", onBack = { Nav.pop() },
+        // Pull down to search the mailboxes again.
+        refreshing = Mail.progress != null, onRefresh = { if (Mail.accounts.isNotEmpty()) Mail.scanNow(ctx) },
         actions = {
-            if (list.isNotEmpty()) Text(
+            if (list.size > 1) Text(
                 if (picked.size == list.size) "Select None" else "Select All", color = C.blue, fontSize = 17.sp,
                 modifier = Modifier.clickable {
                     Mail.picked.clear()
@@ -206,65 +214,165 @@ fun MailFoundScreen() {
                 }
             }
         }
-        if (list.isEmpty()) {
-            item("empty") {
-                Spacer(Modifier.height(8.dp))
-                Group { Cell("No new flight emails", icon = Icons.Filled.CheckCircle, iconTint = C.green) }
-                Footnote(
-                    if (Mail.accounts.isEmpty()) "Link an email account first."
-                    else "Emails you imported or dismissed, and ones whose flights are already saved, aren't shown.",
-                )
-                Spacer(Modifier.height(12.dp))
-                if (Mail.accounts.isEmpty()) Button("Link an account", Modifier.fillMaxWidth()) { Nav.pop(); Nav.push(Screen.MailAccounts) }
-                else Button("Scan now", Modifier.fillMaxWidth(), enabled = Mail.progress == null) { Mail.scanNow(ctx) }
-            }
-            return@Page
+        if (list.isEmpty() && dupes.isEmpty()) item("empty") {
+            Spacer(Modifier.height(8.dp))
+            Group { Cell("No new flight emails", icon = Icons.Filled.CheckCircle, iconTint = C.green) }
+            Footnote(if (Mail.accounts.isEmpty()) "Link an email account first." else "Emails you imported or dismissed aren't shown.")
+            Spacer(Modifier.height(12.dp))
+            if (Mail.accounts.isEmpty()) Button("Link an account", Modifier.fillMaxWidth()) { Nav.pop(); Nav.push(Screen.MailAccounts) }
+            else Button("Scan now", Modifier.fillMaxWidth(), enabled = Mail.progress == null) { Mail.scanNow(ctx) }
         }
-        item("list") {
-            SectionHeader("${list.size} email${if (list.size == 1) "" else "s"} with flights")
-            Group {
-                list.forEachIndexed { i, h ->
-                    if (i > 0) Hairline(52.dp)
+
+        if (list.isNotEmpty()) {
+            item("new-head") {
+                SectionHeader("${list.size} new")
+            }
+            list.forEach { h ->
+                item(h.key) {
                     val on = h.key in picked
-                    Row(
-                        Modifier.fillMaxWidth().clickable { if (on) Mail.picked.remove(h.key) else Mail.picked.add(h.key) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                    ) {
-                        Icon(
-                            if (on) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked, null,
-                            tint = if (on) C.blue else C.tertiary, modifier = Modifier.size(24.dp),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(h.subject.ifEmpty { "(no subject)" }, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                listOfNotNull(h.from, dayLabel(h.sent), h.account.takeIf { Mail.accounts.size > 1 }).joinToString(" · "),
-                                fontSize = 13.sp, color = C.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(h.summary(), fontSize = 14.sp, color = C.indigo, modifier = Modifier.padding(top = 3.dp))
-                            Text(
-                                "Dismiss", fontSize = 13.sp, color = C.secondary, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(top = 4.dp).clickable { Mail.mark(listOf(h.key), "d") },
-                            )
-                        }
+                    EmailCard(h, selected = on, onSelect = { if (on) Mail.picked.remove(h.key) else Mail.picked.add(h.key) }) {
+                        Action("Dismiss", C.secondary) { Mail.mark(listOf(h.key), "d") }
+                        Action("Review", C.blue) { Mail.review(listOf(h.key)) }
                     }
+                    Spacer(Modifier.height(12.dp))
                 }
             }
-            Footnote("Tick the ones that are your flights, then review and import them one at a time.")
+            item("new-actions") {
+                if (picked.size > 1) Button("Review ${picked.size} selected", Modifier.fillMaxWidth()) { Mail.review(picked) }
+                Footnote("Review opens each email's flights to check and import, one at a time.")
+            }
         }
-        item("actions") {
-            Spacer(Modifier.height(16.dp))
-            Button("Review ${picked.size} selected", Modifier.fillMaxWidth(), enabled = picked.isNotEmpty()) { Mail.review(picked) }
-            Spacer(Modifier.height(10.dp))
-            Button("Dismiss all", Modifier.fillMaxWidth(), filled = false, color = C.red) { confirmAll = true }
+
+        if (dupes.isNotEmpty()) {
+            item("dupe-head") {
+                SectionHeader("Already saved")
+            }
+            dupes.forEach { (h, adds) ->
+                item(h.key) {
+                    EmailCard(
+                        h, saved = true,
+                        note = if (adds.isEmpty()) "Nothing new: you have these flights with the same details."
+                        else "Merging adds the " + adds.joinToString(" and ") + " from this email.",
+                    ) {
+                        Action("Dismiss", C.secondary) { Mail.mark(listOf(h.key), "d") }
+                        Action("Import anyway", C.blue) { Mail.review(listOf(h.key)) }
+                        if (adds.isNotEmpty()) Action("Merge", C.blue, bold = true) {
+                            Mail.merge(h.key)
+                            Toast.makeText(ctx, "Added the ${adds.joinToString(" and ")} to your saved flights", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+        }
+
+        item("footer") {
+            if (list.isNotEmpty() || dupes.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Button("Dismiss all", Modifier.fillMaxWidth(), filled = false, color = C.red) { confirmAll = true }
+            }
+            if (dismissed > 0) {
+                Spacer(Modifier.height(10.dp))
+                Button("Show $dismissed dismissed email${if (dismissed == 1) "" else "s"} again", Modifier.fillMaxWidth(), filled = false) {
+                    Mail.restoreDismissed()
+                }
+            }
         }
     }
 
-    if (confirmAll) AlertDialog(
-        onDismissRequest = { confirmAll = false },
-        title = { Text("Dismiss ${list.size} emails?") },
-        text = { Text("They won't be suggested again. You can bring them back from Settings › Backup › Find flights in email.") },
-        confirmButton = { TextButton({ Mail.mark(list.map { it.key }, "d"); confirmAll = false }) { Text("Dismiss all", color = C.red) } },
-        dismissButton = { TextButton({ confirmAll = false }) { Text("Cancel") } },
-    )
+    if (confirmAll) {
+        val all = list.map { it.key } + dupes.map { it.hit.key }
+        AlertDialog(
+            onDismissRequest = { confirmAll = false },
+            title = { Text("Dismiss ${all.size} emails?") },
+            text = { Text("They won't be suggested again unless you bring them back with Show dismissed emails again.") },
+            confirmButton = { TextButton({ Mail.mark(all, "d"); confirmAll = false }) { Text("Dismiss all", color = C.red) } },
+            dismissButton = { TextButton({ confirmAll = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+private val hourMinute = DateTimeFormatter.ofPattern("h:mm a")
+
+/** One email: subject and sender, its flights laid out like the Flights tab, and actions along the bottom. */
+@Composable
+private fun EmailCard(
+    h: MailHit,
+    selected: Boolean? = null,
+    onSelect: () -> Unit = {},
+    saved: Boolean = false,
+    note: String? = null,
+    actions: @Composable RowScope.() -> Unit,
+) = Group {
+    Row(
+        Modifier.fillMaxWidth().then(if (selected != null) Modifier.clickable(onClick = onSelect) else Modifier)
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        if (selected != null) {
+            Icon(
+                if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked, null,
+                tint = if (selected) C.blue else C.tertiary, modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(h.subject.ifEmpty { "(no subject)" }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                listOfNotNull(h.from, dayLabel(h.sent), h.account.takeIf { Mail.accounts.size > 1 }).joinToString(" · "),
+                fontSize = 13.sp, color = C.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    h.flights.take(3).forEach { f ->
+        Hairline()
+        FoundRow(f, saved)
+    }
+    if (h.flights.size > 3) {
+        Hairline()
+        Text("+${h.flights.size - 3} more flights", fontSize = 13.sp, color = C.secondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+    }
+    note?.let {
+        Hairline()
+        Text(it, fontSize = 13.sp, color = C.secondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+    }
+    Hairline(0.dp)
+    Row(Modifier.fillMaxWidth().height(46.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
+}
+
+/** A text button sharing the card's bottom row equally with the others. */
+@Composable
+private fun RowScope.Action(text: String, color: androidx.compose.ui.graphics.Color, bold: Boolean = false, onClick: () -> Unit) = Box(
+    Modifier.weight(1f).fillMaxHeight().clickable(onClick = onClick), contentAlignment = Alignment.Center,
+) {
+    Text(text, color = color, fontSize = 15.sp, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
+}
+
+/** "DL 400 / DTW → PWM" on the left, the day and times on the right, as on a flight card. */
+@Composable
+private fun FoundRow(f: Found, saved: Boolean) = Row(
+    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+) {
+    AirlineBadge(f.airline)
+    Spacer(Modifier.width(10.dp))
+    Column(Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(f.label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.secondary)
+            if (saved) {
+                Spacer(Modifier.width(6.dp))
+                Badge("Saved", C.green)
+            }
+        }
+        Text(
+            if (f.from != null && f.to != null) "${f.from} → ${f.to}" else "Route looked up on import",
+            fontSize = if (f.from != null && f.to != null) 20.sp else 14.sp, fontWeight = FontWeight.Bold,
+        )
+    }
+    Column(horizontalAlignment = Alignment.End) {
+        Text(f.date?.let(::dayLabel) ?: "No date", fontSize = 15.sp, color = if (f.date == null) C.red else C.label)
+        if (f.dep != null) Text(
+            f.dep.format(hourMinute) + (f.arr?.let { " – " + it.format(hourMinute) } ?: ""),
+            fontSize = 13.sp, color = C.secondary,
+        )
+    }
 }

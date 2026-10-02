@@ -39,11 +39,18 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** A linked mailbox. [secret] is the app password, encrypted by [Vault]; [lastUid] is how far scans have read. */
+/**
+ * A linked mailbox. [secret] is the app password, encrypted by [Vault]. At the last scan [matched] of the mailbox's
+ * [total] emails matched the booking search.
+ */
 data class MailAccount(
     val email: String, val host: String, val secret: String,
-    val validity: Long = 0, val lastUid: Long = 0, val scanned: Long = 0, val error: String = "",
-)
+    val scanned: Long = 0, val error: String = "", val matched: Long = 0, val total: Long = 0,
+) {
+    /** "180 of 9,412 emails looked like bookings". */
+    val summary: String
+        get() = if (total > 0) "%,d of %,d emails looked like bookings".format(matched, total) else ""
+}
 
 /** An email with flights in it. [state]: "" suggested, "i" imported, "d" dismissed (the history: never suggested again). */
 data class MailHit(
@@ -59,9 +66,15 @@ data class MailHit(
 fun suggest(hits: List<MailHit>, saved: (Found) -> Boolean): List<MailHit> =
     hits.filter { h -> h.state.isEmpty() && h.flights.any { !saved(it) } }.sortedByDescending { it.sent }
 
+/** An email whose flights are all saved already; [adds] is what merging it would fill in ("seat", ...). */
+data class MailDupe(val hit: MailHit, val adds: List<String>)
+
 /** "UA 1000 SFO→PIT · Oct 3" for each flight. */
-fun MailHit.summary() = flights.joinToString(", ") { f ->
-    f.label + (if (f.from != null && f.to != null) " ${f.from}→${f.to}" else "") + (f.date?.let { " · " + dayLabel(it) } ?: "")
+fun MailHit.summary(): String {
+    val shown = flights.take(3).joinToString("\n") { f ->
+        f.label + (if (f.from != null && f.to != null) " ${f.from}→${f.to}" else "") + (f.date?.let { " · " + dayLabel(it) } ?: "")
+    }
+    return if (flights.size > 3) "$shown\n+${flights.size - 3} more" else shown
 }
 
 /**
@@ -87,7 +100,7 @@ object Mail {
                 for (i in 0 until a.length()) a.getJSONObject(i).run {
                     accounts += MailAccount(
                         getString("email"), optString("host", GMAIL), getString("secret"),
-                        optLong("validity"), optLong("lastUid"), optLong("scanned"), optString("error"),
+                        optLong("scanned"), optString("error"), optLong("matched"), optLong("total"),
                     )
                 }
             }
@@ -106,8 +119,8 @@ object Mail {
     private fun save() = synchronized(this) {
         val j = JSONObject()
             .put("accounts", JSONArray(accounts.map {
-                JSONObject().put("email", it.email).put("host", it.host).put("secret", it.secret).put("validity", it.validity)
-                    .put("lastUid", it.lastUid).put("scanned", it.scanned).put("error", it.error)
+                JSONObject().put("email", it.email).put("host", it.host).put("secret", it.secret)
+                    .put("scanned", it.scanned).put("error", it.error).put("matched", it.matched).put("total", it.total)
             }))
             .put("hits", JSONArray(hits.map {
                 JSONObject().put("account", it.account).put("id", it.id).put("subject", it.subject).put("from", it.from)
@@ -119,6 +132,22 @@ object Mail {
     }
 
     val suggestions get() = suggest(hits) { existingFor(it) != null }
+
+    /** Emails not yet acted on whose flights are all saved, newest first. */
+    val duplicates: List<MailDupe>
+        get() = hits.filter { h -> h.state.isEmpty() && h.flights.isNotEmpty() && h.flights.all { existingFor(it) != null } }
+            .sortedByDescending { it.sent }
+            .map { h -> MailDupe(h, h.flights.flatMap { f -> existingFor(f)?.let { mergeAdds(it, f) }.orEmpty() }.distinct()) }
+
+    /** Fills the saved flights' missing details (seat, confirmation, times) from the email [key], then files it. */
+    fun merge(key: String) {
+        val h = hits.firstOrNull { it.key == key } ?: return
+        for (f in h.flights) {
+            val old = existingFor(f) ?: continue
+            f.toFlight(listOf(old.from, old.to), old.friend, old.work)?.let { Store.upsert(old.fillFrom(it)) }
+        }
+        mark(listOf(key), "i")
+    }
 
     fun add(ctx: Context, email: String, host: String, password: String) {
         accounts.removeAll { it.email == email }
@@ -190,9 +219,10 @@ object Mail {
             im.login(a.email, Vault.decrypt(a.secret))
             val gmail = "X-GM-EXT-1" in im.caps()
             val box = im.examine(if (gmail) im.allMail() else "INBOX")
-            val start = MailQuery.start(box.validity, a.validity, a.lastUid)
+            // The whole mailbox every time: the server does the searching, and only a few hundred emails match.
+            // Ones already suggested, imported or dismissed are skipped before their text is downloaded.
             progress = "Searching ${a.email}…"
-            val uids = MailQuery.fresh(im.search(if (gmail) MailQuery.gmail(start) else MailQuery.standard(start)), start)
+            val uids = im.search(if (gmail) MailQuery.gmail() else MailQuery.standard()).distinct().sorted()
             var done = 0
             for (chunk in uids.chunked(20)) {
                 val heads = im.fetch(chunk.joinToString(","), "INTERNALDATE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT MESSAGE-ID)]")
@@ -200,18 +230,13 @@ object Mail {
                     progress = "Reading ${a.email}: ${++done} of ${uids.size}"
                     heads[uid]?.let { read(ctx, im, a.email, box.validity, uid, it, known) }
                 }
-                // Progress is saved per batch, so an interrupted first scan picks up where it stopped.
-                a = a.copy(validity = box.validity, lastUid = chunk.last())
                 withContext(Dispatchers.Main) {
                     hits += found
                     added += suggest(found) { existingFor(it) != null }.sumOf { it.flights.size }
-                    put(a)
+                    save()
                 }
             }
-            a = a.copy(
-                validity = box.validity, lastUid = maxOf(uids.lastOrNull() ?: (start - 1), box.uidNext - 1),
-                scanned = System.currentTimeMillis(), error = "",
-            )
+            a = a.copy(scanned = System.currentTimeMillis(), error = "", matched = uids.size.toLong(), total = box.exists)
             withContext(Dispatchers.Main) { put(a) }
         }
         added
@@ -252,7 +277,7 @@ object Mail {
      * stops, leaving the rest ticked. Ones whose flights got saved along the way are skipped.
      */
     fun review(keys: List<String>) {
-        val queue = keys.mapNotNull { k -> suggestions.firstOrNull { it.key == k } }
+        val queue = keys.mapNotNull { k -> hits.firstOrNull { it.key == k && it.state.isEmpty() } }
         val h = queue.firstOrNull() ?: return
         Imports.clear()
         Imports.found = h.flights
