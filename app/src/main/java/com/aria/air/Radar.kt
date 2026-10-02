@@ -347,7 +347,7 @@ fun FullMap(f: Flight, onClose: () -> Unit) {
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(C.sea)) {
             WorldMap(
-                listOf(MapRoute(o, d, highlight = true)), Modifier.fillMaxSize(), focus = true, plane = f.live?.takeIf { f.isAirborne },
+                listOf(MapRoute(o, d, highlight = true)), Modifier.fillMaxSize(), focus = true, plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
                 under = radar?.let { r -> { x, y -> drawRadar(r, x, y, alpha = 0.65f) } },
                 over = { x, y ->
                     wx?.let { drawRouteWx(it, o.lon, x, y) }

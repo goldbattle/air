@@ -48,6 +48,7 @@ class App : Application() {
         Guides.init(this)
         Store.init(this)
         Radar.init(this)
+        Routes.init(this)
         Mail.init(this)
         Debug.init(this)
         Store.onChange = { scope.launch { FlightWidget.refresh(this@App) } }

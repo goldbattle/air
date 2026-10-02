@@ -68,7 +68,7 @@ object Api {
                 altFt = (alt as? Number)?.toInt() ?: 0, speedKt = a.optDouble("gs", 0.0).toInt(),
                 track = a.optDouble("track", 0.0), vrateFpm = a.optInt("baro_rate"),
                 at = now.minusMillis((a.optDouble("seen_pos", 0.0) * 1000).toLong()),
-                onGround = alt == "ground", aircraft = a.optString("t"), reg = a.optString("r"),
+                onGround = alt == "ground", aircraft = a.optString("t"), reg = a.optString("r"), hex = a.optString("hex"),
             )
         }.firstOrNull { plausible(f, it) }
     }
@@ -501,7 +501,7 @@ object Api {
             lastLiveTry[n.id] = now
             val l = live(n)
             if (l != null) {
-                n = n.copy(live = l, aircraft = n.aircraft.ifEmpty { l.aircraft }, reg = n.reg.ifEmpty { l.reg })
+                n = n.copy(live = l, aircraft = n.aircraft.ifEmpty { l.aircraft }, reg = n.reg.ifEmpty { l.reg }).record(l)
                 // Without a status API, estimate takeoff and landing from where the plane is and how fast it's going.
                 // ponytail: straight line at current ground speed, so a few minutes off with wind and approach paths.
                 val o = n.origin; val d = n.dest
@@ -544,6 +544,7 @@ object Api {
                 },
             )
         }
+        n = Routes.fillTrack(n, auto)
         return runCatching { refreshWeather(n) }.getOrDefault(n)
     }
 }

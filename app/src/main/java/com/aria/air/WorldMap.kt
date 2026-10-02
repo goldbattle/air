@@ -13,6 +13,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -53,15 +54,19 @@ fun WorldMap(
     /** Extra layers in map coordinates (x(lon), y(lat)): [under] over the land and below the routes, [over] on top. */
     under: (DrawScope.(x: (Double) -> Float, y: (Double) -> Float) -> Unit)? = null,
     over: (DrawScope.(x: (Double) -> Float, y: (Double) -> Float) -> Unit)? = null,
+    /** Flown, planned and past paths of one flight (Routes.kt); null draws [routes] as plain arcs. */
+    paths: MapPaths? = null,
 ) {
     val arcs = remember(routes) { routes.map { greatCircle(it.from.lat, it.from.lon, it.to.lat, it.to.lon) } }
+    val ref = arcs.firstOrNull()?.first()?.second ?: 0.0
+    val extra = remember(paths, ref) { paths?.let { p -> listOf(p.flown, p.rest).plus(p.typical).map { unwrap(it, ref) } } }
     val planePainter = rememberVectorPainter(Icons.Filled.Flight)
     // Clipped: land paths extend past the viewport and would otherwise spill over whatever is below the map.
     Canvas(modifier.clipToBounds()) {
         // Viewport in degrees.
         var lonMin = -170.0; var lonMax = 190.0; var latMin = -58.0; var latMax = 80.0
         if (focus && arcs.isNotEmpty()) {
-            val pts = arcs.flatten()
+            val pts = arcs.flatten() + extra.orEmpty().flatten()
             lonMin = pts.minOf { it.second }; lonMax = pts.maxOf { it.second }
             latMin = pts.minOf { it.first }; latMax = pts.maxOf { it.first }
             val padLon = max(6.0, (lonMax - lonMin) * 0.25); val padLat = max(4.0, (latMax - latMin) * 0.35)
@@ -92,7 +97,20 @@ fun WorldMap(
         under?.invoke(this, ::x, ::y)
 
         val w = if (focus) 3.dp.toPx() else 1.6.dp.toPx()
-        routes.zip(arcs).sortedBy { it.first.highlight }.forEach { (route, pts) ->
+        fun stroke(pts: List<Pair<Double, Double>>, color: Color, width: Float, dash: Boolean = false) {
+            if (pts.size < 2) return
+            val p = Path()
+            pts.forEachIndexed { i, (la, lo) -> if (i == 0) p.moveTo(x(lo), y(la)) else p.lineTo(x(lo), y(la)) }
+            drawPath(p, color, style = Stroke(width, cap = StrokeCap.Round,
+                pathEffect = if (dash) PathEffect.dashPathEffect(floatArrayOf(2.2f * width, 2f * width)) else null))
+        }
+        // Past paths faint and thin behind; the plan dashed (from the plane on once flying); what was flown solid.
+        if (paths != null && extra != null) {
+            extra.drop(2).forEach { stroke(it, line.copy(alpha = 0.22f), 1.4.dp.toPx()) }
+            if (paths.arc) arcs.forEach { stroke(it, line.copy(alpha = 0.75f), w * 0.8f, dash = true) }
+            stroke(extra[1], line.copy(alpha = 0.5f), w * 0.7f, dash = true)
+            stroke(extra[0], line, w)
+        } else routes.zip(arcs).sortedBy { it.first.highlight }.forEach { (route, pts) ->
             val p = Path()
             pts.forEachIndexed { i, (la, lo) -> if (i == 0) p.moveTo(x(lo), y(la)) else p.lineTo(x(lo), y(la)) }
             drawPath(p, if (route.highlight || focus) line else line.copy(alpha = 0.75f), style = Stroke(w, cap = StrokeCap.Round))

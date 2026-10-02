@@ -52,6 +52,7 @@ suspend fun refreshAndSave(ctx: android.content.Context, f: Flight, force: Boole
 private fun refreshNow(ctx: android.content.Context, id: String, force: Boolean = false, done: () -> Unit = {}) = App.scope.launch {
     Store.get(id)?.let { refreshAndSave(ctx, it, force) }
     done()
+    Store.get(id)?.let { Routes.update(it, force) } // recent paths of this flight number (Routes.kt)
 }
 
 @Composable
@@ -199,7 +200,7 @@ private fun MapHeader(f: Flight) {
             val wx = f.routeWx?.takeIf { Layers.weather }
             WorldMap(
                 listOf(MapRoute(o, d, highlight = true)), Modifier.matchParentSize(), focus = true, centerY = 0.36f,
-                plane = f.live?.takeIf { f.isAirborne },
+                plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
                 under = radar?.let { r -> { x, y -> drawRadar(r, x, y) } }, // radar layer (Radar.kt)
                 over = wx?.let { w -> { x, y -> drawRouteWx(w, o.lon, x, y) } }, // route weather layer (RouteWx.kt)
             )
