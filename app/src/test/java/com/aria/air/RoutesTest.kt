@@ -11,6 +11,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.time.Instant
 
 /** Recorded tracks, adsb.lol trace parsing and what the flight map draws (Routes.kt). Fake data only. */
 class RoutesTest : AirTest() {
@@ -28,6 +29,25 @@ class RoutesTest : AirTest() {
     }
 
     private val sfo get() = Db.airport("SFO")!!
+
+    @Test
+    fun inboundFromThePlanesTrace() {
+        // Our flight leaves PIT in an hour; the plane's trace: a red-eye from SFO, last seen low over PIT 50 min ago.
+        val ours = flight(hours(1), from = "PIT", to = "SFO").copy(hex = "a1b213")
+        val t0 = NOW.epochSecond - 6 * 3600
+        val trace = JSONObject().put("timestamp", t0).put("trace", JSONArray()
+            .put(JSONArray("[0, 37.62, -122.38, 3000, 180, 60, 2, 1500, {\"flight\": \"UAL1300 \"}]"))
+            .put(JSONArray("[9000, 41.5, -100.0, 37000, 480, 80, 0, 0, null]"))
+            .put(JSONArray("[18600, 40.47, -80.30, 2200, 150, 100, 0, -700, null]"))
+            .put(JSONArray("[18900, 40.49, -80.23, \"ground\", 15, 100, 0, 0, null]")))
+        val i = Routes.arrivedHere(trace.toString(), ours, NOW)!!
+        assertEquals("UAL1300", i.callsign); assertEquals("SFO", i.from); assertEquals("PIT", i.to)
+        assertTrue(i.onGround)
+        assertEquals(Instant.ofEpochSecond(t0 + 18600 + 180), i.landedAt)
+        assertTrue(ours.copy(inbound = i).inboundHere())
+        // A previous leg that ended somewhere else isn't our inbound.
+        assertNull(Routes.arrivedHere(trace.toString(), ours.copy(from = "ORD"), NOW))
+    }
     private val bos get() = Db.airport("BOS")!!
 
     /** A readsb trace_full: ground rows, then [legs] of (callsign, takeoff epoch s, from, to) a minute apart, 5 h each. */

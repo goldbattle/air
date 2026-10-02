@@ -204,8 +204,12 @@ object Radar {
     }
 
     /** Worth showing from [LEAD] before departure until landing, on a flight that's on, with the layer on. */
-    fun shown(f: Flight, now: Instant) = Layers.radar && !f.cancelled && f.arrActual == null && f.origin != null &&
+    /** Whether radar means anything for [f] now: from [LEAD] before departure to landing. */
+    fun relevant(f: Flight, now: Instant) = !f.cancelled && f.arrActual == null && f.origin != null &&
         f.dest != null && now >= f.depGuess.minus(LEAD) && now < f.arrGuess
+
+    /** Relevant and the radar layer is on. The layer only hides the picture; fetching and the cache ignore it. */
+    fun shown(f: Flight, now: Instant) = Layers.radar && relevant(f, now)
 
     fun due(lastTry: Instant?, now: Instant) = lastTry == null || Duration.between(lastTry, now) >= EVERY
 
@@ -244,7 +248,7 @@ object Radar {
      */
     suspend fun get(f: Flight): RadarImage? {
         val now = Instant.now(clock)
-        if (!shown(f, now)) {
+        if (!relevant(f, now)) {
             cache.remove(f.id)
             dir?.let { d -> java.io.File(d, "${f.id}.png").delete(); java.io.File(d, "${f.id}.txt").delete() }
             return null

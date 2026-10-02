@@ -242,6 +242,7 @@ object Api {
             baggage = keep(f.baggage, s(arr, "baggageBelt")),
             aircraft = aircraft?.optString("model")?.takeIf { it.isNotEmpty() } ?: f.aircraft,
             reg = keep(f.reg, aircraft?.optString("reg").orEmpty()),
+            hex = aircraft?.optString("modeS")?.lowercase()?.takeIf { it.length == 6 } ?: f.hex,
             cancelled = status.startsWith("Cancel"), diverted = status == "Diverted",
             adbSaid = said, disputed = disputed,
         )
@@ -530,12 +531,15 @@ object Api {
                 val landed = prev?.landedAt?.takeIf { i.onGround } ?: if (prev != null && !prev.onGround && i.onGround) i.at else null
                 i.copy(landedAt = landed, firstSeen = prev?.firstSeen ?: i.at)
             }
+            // Not broadcasting: maybe already parked here. Its trace says which flight brought it and when it landed.
+            val traced = if (fresh == null && prev?.landedAt == null) runCatching { Routes.inbound(n) }.getOrNull() else null
             val o = n.origin
             val quietAfterLanding = fresh == null && prev != null && !prev.onGround && prev.to == n.from && o != null &&
                 prev.eta != null && now > prev.eta.minus(Duration.ofMinutes(10))
             n = n.copy(
                 inbound = when {
                     fresh != null -> fresh
+                    traced != null -> traced.copy(firstSeen = prev?.firstSeen ?: traced.at)
                     // Went quiet around its expected landing here: it landed and parked (transponders go off at the gate).
                     quietAfterLanding -> prev!!.copy(
                         onGround = true, lat = o!!.lat, lon = o.lon, altFt = 0, speedKt = 0, eta = null, landedAt = prev.eta,

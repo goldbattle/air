@@ -218,6 +218,41 @@ object Routes {
         }
     }
 
+    // ---------- The inbound plane, from its trace ----------
+
+    /**
+     * The plane's previous flight from its trace when it ended here: the last leg under another callsign before ours,
+     * whose last airborne point is low and close to our origin (it landed; parked planes stop broadcasting). Free,
+     * and it covers what live tracking can't: a plane already at the gate with its transponder off.
+     */
+    fun arrivedHere(json: String, f: Flight, now: Instant): Inbound? {
+        val o = f.origin ?: return null
+        val ours = Api.callsign(f.airline, f.number)
+        val dep = (f.dep ?: f.depGuess).epochSecond
+        val legs = mutableListOf<Pair<String, MutableList<Pt>>>()
+        for ((c, newLeg, p) in rows(json)) {
+            if (legs.isEmpty() || newLeg) legs += c to mutableListOf()
+            if (p != null) legs.last().second += p
+        }
+        val (call, pts) = legs.lastOrNull { (c, pts) -> c.isNotEmpty() && c != ours && pts.isNotEmpty() && pts.last().t < dep }
+            ?: return null
+        val last = pts.last()
+        if (distKm(last.lat, last.lon, o.lat, o.lon) > 40 || last.altFt > 6000) return null
+        val start = pts.first()
+        val from = Db.airports.values.minByOrNull { distKm(it.lat, it.lon, start.lat, start.lon) }
+            ?.takeIf { distKm(it.lat, it.lon, start.lat, start.lon) < 40 }?.iata.orEmpty()
+        return Inbound(
+            callsign = call, from = from, to = f.from, lat = o.lat, lon = o.lon, altFt = 0, speedKt = 0, onGround = true,
+            eta = null, at = now, landedAt = Instant.ofEpochSecond(last.t + 180), // a few minutes from final approach
+        )
+    }
+
+    /** [arrivedHere] for [f] from adsb.lol, by the plane's ICAO hex. */
+    suspend fun inbound(f: Flight): Inbound? = withContext(Dispatchers.IO) {
+        val hex = f.hex.lowercase().takeIf { it.length == 6 } ?: return@withContext null
+        arrivedHere(Api.get("https://adsb.lol/data/traces/${hex.takeLast(2)}/trace_full_$hex.json"), f, Instant.now(clock))
+    }
+
     // ---------- This flight's own full path ----------
 
     private val trackTries = ConcurrentHashMap<String, Pair<Instant, Int>>()

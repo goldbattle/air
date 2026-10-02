@@ -49,7 +49,7 @@ class FlightWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Radar layer (Radar.kt): fetched here when due, then drawn from memory.
-        widgetFlight()?.let { f -> kotlinx.coroutines.withTimeoutOrNull(20_000) { Radar.get(f) } }
+        if (Layers.radar) widgetFlight()?.let { f -> kotlinx.coroutines.withTimeoutOrNull(20_000) { Radar.get(f) } }
         provideContent { WidgetContent(context) }
     }
 
@@ -160,7 +160,7 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
         path.close()
     }
     c.drawPath(path, land)
-    if (large) Radar.cached(f)?.let { drawRadar(c, it, ::x, ::y) } // radar layer (Radar.kt), largest size only
+    Radar.cached(f)?.let { drawRadar(c, it, ::x, ::y) } // radar layer (Radar.kt), every size
 
     val phase = f.phase()
     val p = when {
