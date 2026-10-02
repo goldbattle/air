@@ -35,6 +35,36 @@ class ApiTest : AirTest() {
     private val sfo get() = Db.airport("SFO")!!
     private val bos get() = Db.airport("BOS")!!
 
+    // ---------- FlightAware inbound ----------
+
+    @Test
+    fun flightAwareInboundCoversAParkedPlane() {
+        val ours = flight(hours(1), from = "PIT", to = "SFO") // the plane's next flight is ours, from PIT
+        fun fa(vararg kv: Pair<String, Any>) = org.json.JSONObject().apply {
+            put("ident_icao", "UAL1234")
+            put("origin", org.json.JSONObject().put("code_iata", "ORD"))
+            put("destination", org.json.JSONObject().put("code_iata", "PIT"))
+            kv.forEach { (k, v) -> put(k, v) }
+        }
+        val pit = Db.airport("PIT")!!
+        // Landed at PIT: on the ground here, with the landing time, so "at the gate".
+        val landed = Api.inboundFromAero(ours, fa("actual_off" to "2026-10-02T09:00:00Z", "actual_on" to "2026-10-02T10:20:00Z", "actual_in" to "2026-10-02T10:28:00Z"), NOW)!!
+        assertTrue(landed.onGround)
+        assertEquals(pit.lat, landed.lat, 0.001)
+        assertEquals(Instant.parse("2026-10-02T10:28:00Z"), landed.landedAt)
+        assertTrue(ours.copy(inbound = landed).inboundHere())
+        // In the air: halfway by FlightAware's progress, arriving at the estimated gate time.
+        val flying = Api.inboundFromAero(ours, fa("actual_off" to "2026-10-02T11:00:00Z", "progress_percent" to 50, "estimated_in" to "2026-10-02T12:30:00Z"), NOW)!!
+        assertFalse(flying.onGround)
+        assertEquals(Instant.parse("2026-10-02T12:30:00Z"), flying.eta)
+        assertEquals((Db.airport("ORD")!!.lat + pit.lat) / 2, flying.lat, 0.001)
+        // Not left yet: still at ORD, no arrival estimate to judge by.
+        val waiting = Api.inboundFromAero(ours, fa(), NOW)!!
+        assertTrue(waiting.onGround)
+        assertNull(waiting.eta)
+        assertFalse(ours.copy(inbound = waiting).inboundHere())
+    }
+
     // ---------- Cadences ----------
 
     @Test

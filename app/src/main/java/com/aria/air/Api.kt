@@ -117,6 +117,7 @@ object Api {
             "https://aeroapi.flightaware.com/aeroapi/flights/${callsign(f.airline, f.number)}?start=$start&end=$end",
             mapOf("x-apikey" to key),
         )
+        Debug.status(f, body)
         val arr = JSONObject(body).optJSONArray("flights") ?: return@withContext null
         val legs = (0 until arr.length()).map { arr.getJSONObject(it) }
         fun iata(j: JSONObject, k: String) = j.optJSONObject(k)?.optString("code_iata").orEmpty()
@@ -139,6 +140,46 @@ object Api {
             arrTerminal = s("terminal_destination"), arrGate = s("gate_destination"), baggage = s("baggage_claim"),
             aircraft = s("aircraft_type").ifEmpty { f.aircraft }, reg = s("registration").ifEmpty { f.reg },
             cancelled = leg.optBoolean("cancelled"), diverted = leg.optBoolean("diverted"),
+            inbound = s("inbound_fa_flight_id").takeIf { it.isNotEmpty() && soon(f) }
+                ?.let { id -> runCatching { aeroInbound(f, id, key) }.getOrNull() } ?: f.inbound,
+        )
+    }
+
+    private fun soon(f: Flight) = Duration.between(Instant.now(clock), f.dep ?: f.depGuess) < Duration.ofHours(12)
+
+    /**
+     * The plane's previous flight from FlightAware ([id] is its inbound_fa_flight_id), as an [Inbound]. Unlike ADS-B,
+     * this knows about a plane parked at the gate with its transponder off: whether it has left, when it gets in, and
+     * when it landed. Its position is placed at an airport, or along the route by FlightAware's progress.
+     */
+    suspend fun aeroInbound(f: Flight, id: String, key: String): Inbound? = withContext(Dispatchers.IO) {
+        countLookup()
+        val j = JSONObject(get("https://aeroapi.flightaware.com/aeroapi/flights/$id", mapOf("x-apikey" to key)))
+            .optJSONArray("flights")?.optJSONObject(0) ?: return@withContext null
+        inboundFromAero(f, j, Instant.now(clock))
+    }
+
+    /** [j]: a FlightAware flight object for the plane's previous flight. Pure, for tests. */
+    fun inboundFromAero(f: Flight, j: JSONObject, now: Instant): Inbound? {
+        fun t(vararg keys: String) = keys.firstNotNullOfOrNull { k ->
+            j.optString(k).takeIf { it.isNotEmpty() && it != "null" }?.let { runCatching { Instant.parse(it) }.getOrNull() }
+        }
+        fun iata(k: String) = j.optJSONObject(k)?.optString("code_iata").orEmpty()
+        val from = iata("origin"); val to = iata("destination")
+        val a = Db.airport(from); val b = Db.airport(to) ?: return null
+        val left = t("actual_off", "actual_out")
+        val landed = t("actual_in", "actual_on")
+        val progress = j.optInt("progress_percent", 0).coerceIn(0, 100) / 100.0
+        val (lat, lon) = when {
+            landed != null || a == null -> b.lat to b.lon
+            left == null -> a.lat to a.lon
+            else -> a.lat + (b.lat - a.lat) * progress to a.lon + (b.lon - a.lon) * progress
+        }
+        return Inbound(
+            callsign = j.optString("ident_icao").ifEmpty { j.optString("ident") }, from = from, to = to,
+            lat = lat, lon = lon, altFt = 0, speedKt = 0, onGround = landed != null || left == null,
+            eta = if (landed == null && left != null) t("estimated_in", "estimated_on", "scheduled_in") else null,
+            at = now, landedAt = landed?.takeIf { to == f.from },
         )
     }
 
@@ -152,6 +193,7 @@ object Api {
                 "?withAircraftImage=false&withLocation=false&dateLocalRole=Departure",
             adbHeaders(key),
         )
+        Debug.status(f, body)
         if (body.isBlank()) return@withContext null // 204: no such flight that day
         val legs = org.json.JSONArray(body).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
         fun iata(side: JSONObject?) = side?.optJSONObject("airport")?.optString("iata").orEmpty()
@@ -380,8 +422,18 @@ object Api {
                 else -> null
             }
             if (status == null && key0(adbKey, aeroKey)) Debug.note("status lookup for ${f.label}: no matching flight that day")
+            // AeroDataBox often lacks the tail number and departure gate until late; FlightAware usually has them.
+            val gaps = status != null && adbKey.isNotBlank() && aeroKey.isNotBlank() && soon(status) && status.tookOff == null &&
+                (status.reg.isEmpty() || status.depGate.isEmpty() || status.inbound == null || status.inbound.onGround.not())
+            val filled = if (gaps) runCatching { aero(status!!, aeroKey) }.onFailure(::failed).getOrNull()?.let { fa ->
+                countLookup()
+                status!!.copy(
+                    reg = status.reg.ifEmpty { fa.reg }, depGate = status.depGate.ifEmpty { fa.depGate },
+                    depTerminal = status.depTerminal.ifEmpty { fa.depTerminal }, inbound = fa.inbound ?: status.inbound,
+                )
+            } else status
             if (adbKey.isNotBlank() || aeroKey.isNotBlank()) countLookup()
-            status?.let { n = it.copy(updated = now) }
+            filled?.let { n = it.copy(updated = now) }
         }
         // Without a status provider, takeoff and landing are inferred from ADS-B below.
         val key = adbKey + aeroKey

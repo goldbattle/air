@@ -39,11 +39,13 @@ object Debug {
         if (!on) return
         val r = result.fold({ "${it.length} B" }, { "failed: ${it.message}" })
         note("GET ${url.substringAfter("://")}  $r  ${ms}ms")
-        // Status responses are the ones worth reading in full; keep the latest per flight number and day.
-        result.getOrNull()?.takeIf { "aerodatabox" in url || "aeroapi" in url }?.let { body ->
-            val name = url.substringAfter("/flights/").replace(Regex("[^A-Za-z0-9-]"), "_").take(60)
-            file?.parentFile?.let { File(it, "debug-$name.json").writeText(body) }
-        }
+    }
+
+    private fun statusFile(f: Flight) = file?.parentFile?.let { File(it, "debug-${f.airline}${f.number}_${f.date}.json") }
+
+    /** The latest raw status response for [f] (AeroDataBox or FlightAware), the one worth reading in full. */
+    fun status(f: Flight, body: String) {
+        if (on) statusFile(f)?.writeText(body.ifBlank { "(empty: the service has no such flight that day)" })
     }
 
     fun log(): String = file?.takeIf { it.exists() }?.readText().orEmpty()
@@ -67,8 +69,12 @@ object Debug {
         appendLine("live ${f.live ?: "none"}")
         f.connection().takeIf { it.size > 1 }?.let { c -> appendLine("connection: ${c.joinToString(" > ") { it.label }}") }
         appendLine("stored: ${f.toJson()}")
-        val name = "${f.airline}${f.number}_${f.date}"
-        file?.parentFile?.listFiles { x -> x.name.startsWith("debug-$name") }?.forEach { appendLine("last status response (${it.name}): ${it.readText().take(6000)}") }
+        statusFile(f)?.takeIf { it.exists() }?.let { appendLine("last status response: ${it.readText().take(8000)}") }
+            ?: appendLine("last status response: none saved yet (tap refresh with developer options on)")
+        // This flight's lines from the log: its refreshes and the requests about its number or callsign.
+        val tags = listOf(f.label, "${f.airline}${f.number}", Api.callsign(f.airline, f.number), f.reg).filter { it.isNotEmpty() }
+        log().lines().filter { l -> tags.any { it in l } }.takeLast(30).takeIf { it.isNotEmpty() }
+            ?.let { appendLine("log:"); it.forEach(::appendLine) }
     }
 
     /** The whole picture: app, phone, settings that matter (keys only as set / not set), nearby flights, the log. */
