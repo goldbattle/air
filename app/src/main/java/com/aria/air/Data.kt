@@ -216,6 +216,7 @@ data class Flight(
     val source: String = "manual",    // manual, search, pdf, image, email, text
     val work: Boolean = false,        // business trip (my flights)
     val depWx: Wx? = null, val arrWx: Wx? = null, // weather at takeoff and landing
+    val routeWx: RouteWx? = null,     // weather along the route (RouteWx.kt)
     val inbound: Inbound? = null,     // the plane's previous flight, before ours
     val faAt: Instant? = null,        // when FlightAware last gave gates, tail and inbound (they outrank AeroDataBox's)
     val adbSaid: String = "",         // AeroDataBox's last raw "departure gate|arrival gate", to notice it changing
@@ -378,6 +379,7 @@ fun Flight.toJson(): JSONObject = JSONObject()
                 .apply { it.eta?.let { e -> put("eta", e.toEpochMilli()) }; it.landedAt?.let { l -> put("landedAt", l.toEpochMilli()) } })
         }
         arrWx?.let { put("arrWx", wx(it)) }
+        routeWx?.let { put("routeWx", it.toJson()) }
         live?.let {
             put("live", JSONObject().put("lat", it.lat).put("lon", it.lon).put("alt", it.altFt).put("gs", it.speedKt)
                 .put("track", it.track).put("vrate", it.vrateFpm).put("at", it.at.toEpochMilli()).put("ground", it.onGround)
@@ -398,6 +400,7 @@ fun flightFrom(j: JSONObject) = Flight(
     friend = j.optString("friend"), source = j.optString("source", "manual"), work = j.optBoolean("work"), updated = j.inst("updated"), faAt = j.inst("faAt"), adbSaid = j.optString("adbSaid"),
     alerted = j.optString("alerted"),
     depWx = j.optJSONObject("depWx")?.let(::wxFrom), arrWx = j.optJSONObject("arrWx")?.let(::wxFrom),
+    routeWx = j.optJSONObject("routeWx")?.let { runCatching { routeWxFrom(it) }.getOrNull() },
     inbound = j.optJSONObject("inbound")?.let {
         Inbound(
             it.getString("callsign"), it.optString("from"), it.optString("to"), it.getDouble("lat"), it.getDouble("lon"),
@@ -561,7 +564,7 @@ fun Flight.mergedWith(o: Flight) = copy(
     seat = seat.ifEmpty { o.seat }, booking = booking.ifEmpty { o.booking },
     notes = listOf(notes, o.notes).filter { it.isNotEmpty() }.distinct().joinToString("\n"),
     work = work || o.work, live = live ?: o.live, updated = updated ?: o.updated,
-    depWx = depWx ?: o.depWx, arrWx = arrWx ?: o.arrWx,
+    depWx = depWx ?: o.depWx, arrWx = arrWx ?: o.arrWx, routeWx = routeWx ?: o.routeWx,
 )
 
 object Dupes {

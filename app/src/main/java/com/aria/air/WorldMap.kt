@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
@@ -49,6 +50,9 @@ fun WorldMap(
     sea: Color = C.sea,
     line: Color = C.blue,
     dot: Color = C.blue,
+    /** Extra layers in map coordinates (x(lon), y(lat)): [under] over the land and below the routes, [over] on top. */
+    under: (DrawScope.(x: (Double) -> Float, y: (Double) -> Float) -> Unit)? = null,
+    over: (DrawScope.(x: (Double) -> Float, y: (Double) -> Float) -> Unit)? = null,
 ) {
     val arcs = remember(routes) { routes.map { greatCircle(it.from.lat, it.from.lon, it.to.lat, it.to.lon) } }
     val planePainter = rememberVectorPainter(Icons.Filled.Flight)
@@ -85,6 +89,7 @@ fun WorldMap(
             }
         }
         drawPath(landPath, land)
+        under?.invoke(this, ::x, ::y)
 
         val w = if (focus) 3.dp.toPx() else 1.6.dp.toPx()
         routes.zip(arcs).sortedBy { it.first.highlight }.forEach { (route, pts) ->
@@ -99,6 +104,7 @@ fun WorldMap(
                 drawCircle(dot, r, Offset(x(lo), y(la)))
             }
         }
+        over?.invoke(this, ::x, ::y)
         if (plane != null) {
             // Put the plane on the same unwrapped longitude as the route line.
             val ref = arcs.firstOrNull()?.first()?.second ?: plane.lon
