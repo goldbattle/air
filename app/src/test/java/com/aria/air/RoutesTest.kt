@@ -31,6 +31,27 @@ class RoutesTest : AirTest() {
     private val sfo get() = Db.airport("SFO")!!
 
     @Test
+    fun yesterdaysPathFromAnotherPlane() = runBlocking {
+        // UA 100 SFO-BOS today; yesterday AeroDataBox says plane abc123 flew it, and its daily history has the leg.
+        val f = flight(hours(5))
+        Prefs.adbKey = "key"
+        val yesterday = f.date.minusDays(1)
+        responses["aerodatabox.p.rapidapi.com/flights/number/UA100/$yesterday"] =
+            """[{"departure":{"airport":{"iata":"SFO"}},"arrival":{"airport":{"iata":"BOS"}},"aircraft":{"modeS":"ABC123"}}]"""
+        val t0 = NOW.epochSecond - 30 * 3600
+        responses["globe_history/${yesterday.toString().replace('-', '/')}/traces/23/trace_full_abc123.json"] = JSONObject()
+            .put("timestamp", t0).put("trace", JSONArray()
+                .put(JSONArray("[0, 37.7, -122.3, 2000, 200, 60, 2, 1500, {\"flight\": \"UAL100\"}]"))
+                .put(JSONArray("[9000, 41.0, -95.0, 37000, 480, 80, 0, 0, null]"))
+                .put(JSONArray("[18000, 42.3, -71.1, 2500, 160, 90, 0, -800, null]"))).toString()
+        val legs = Routes.fetch(f)
+        assertEquals(1, legs.size)
+        assertEquals(t0, legs[0].first().t)
+        Prefs.adbKey = ""
+        assertTrue(Routes.fetch(f).isEmpty()) // no key: no lookups for other days
+    }
+
+    @Test
     fun inboundFromThePlanesTrace() {
         // Our flight leaves PIT in an hour; the plane's trace: a red-eye from SFO, last seen low over PIT 50 min ago.
         val ours = flight(hours(1), from = "PIT", to = "SFO").copy(hex = "a1b213")

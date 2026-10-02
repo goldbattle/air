@@ -184,7 +184,7 @@ object Api {
     }
 
     private val adbTime = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mmX")
-    private fun adbHeaders(key: String) = mapOf("X-RapidAPI-Key" to key, "X-RapidAPI-Host" to "aerodatabox.p.rapidapi.com")
+    internal fun adbHeaders(key: String) = mapOf("X-RapidAPI-Key" to key, "X-RapidAPI-Host" to "aerodatabox.p.rapidapi.com")
 
     /** Status from AeroDataBox (RapidAPI). Covers roughly a year back and a year ahead. */
     suspend fun adb(f: Flight, key: String): Flight? = withContext(Dispatchers.IO) {
@@ -402,7 +402,7 @@ object Api {
     }
 
     /** Lookups this calendar month, shown in Settings › Data so quota use is visible. */
-    private fun countLookup() {
+    internal fun countLookup() {
         val k = "lookups-" + java.time.YearMonth.now()
         Prefs[k] = ((Prefs[k].toIntOrNull() ?: 0) + 1).toString()
     }

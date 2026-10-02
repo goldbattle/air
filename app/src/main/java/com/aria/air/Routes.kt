@@ -199,9 +199,39 @@ object Routes {
             .filter { it.length == 6 && !it.startsWith("~") }
         val hex = (seen + hexes[f.routeKey].orEmpty()).distinct().take(2).also { hexes[f.routeKey] = it }
         val ours = (f.dep ?: f.depGuess).epochSecond
-        hex.flatMap { h ->
+        val recent = hex.flatMap { h ->
             runCatching { legsFrom(Api.get("https://adsb.lol/data/traces/${h.takeLast(2)}/trace_full_$h.json"), cs, f) }.getOrDefault(emptyList())
-        }.filter { Math.abs(it.first().t - ours) > 3 * 3600 }.sortedByDescending { it.first().t }
+        }
+        (recent + earlierDays(f, cs)).filter { Math.abs(it.first().t - ours) > 3 * 3600 }.sortedByDescending { it.first().t }
+    }
+
+    /**
+     * The same flight number on earlier days, which is usually another plane: AeroDataBox (with a key) names the plane
+     * that flew it that day (its modeS hex), and adsb.lol's daily history has that plane's path. One lookup a day,
+     * three with "All recent routes"; nothing without a key.
+     */
+    private fun earlierDays(f: Flight, cs: String): List<List<Pt>> {
+        val key = Prefs.adbKey.takeIf { it.isNotBlank() } ?: return emptyList()
+        val days = if (Prefs.flag(Layers.ROUTES_ALL, false)) 3L else 1L
+        return (1..days).flatMap { back ->
+            val day = f.date.minusDays(back)
+            runCatching {
+                Api.countLookup()
+                val legs = JSONArray(Api.get(
+                    "https://aerodatabox.p.rapidapi.com/flights/number/${f.airline}${f.number}/$day?withAircraftImage=false&withLocation=false&dateLocalRole=Departure",
+                    Api.adbHeaders(key),
+                ).ifBlank { "[]" })
+                val leg = (0 until legs.length()).map { legs.getJSONObject(it) }
+                    .firstOrNull { it.optJSONObject("departure")?.optJSONObject("airport")?.optString("iata") == f.from }
+                val hex = leg?.optJSONObject("aircraft")?.optString("modeS")?.lowercase()?.takeIf { it.length == 6 } ?: return@runCatching emptyList()
+                // History files are per UTC day; a flight can run into the next one.
+                listOf(day, day.plusDays(1)).flatMap { d ->
+                    runCatching {
+                        legsFrom(Api.get("https://adsb.lol/globe_history/${d.toString().replace('-', '/')}/traces/${hex.takeLast(2)}/trace_full_$hex.json"), cs, f)
+                    }.getOrDefault(emptyList())
+                }.take(1)
+            }.getOrDefault(emptyList())
+        }
     }
 
     /** For the flight on screen only: fetches recent paths when [due] ([force] = the refresh button) and caches them. */
