@@ -1,0 +1,18 @@
+{
+  "iata": "AS",
+  "color": "#01426A",
+  "alliance": "oneworld",
+  "hubs": ["SEA", "PDX", "ANC", "SFO", "LAX", "HNL"],
+  "summary": "Seattle-based; merged with Hawaiian Airlines, and both share one baggage policy and the Atmos Rewards program.",
+  "checkin": "Online and app check-in opens 24 hours before departure. Bag drop and airport check-in close 40 minutes before domestic flights.",
+  "baggage": "Carry-on and personal item are free on every fare. In North America the 1st checked bag is $45 and the 2nd $55 (up to 50 lb, 62 linear in; tickets from April 10, 2026). First Class gets 2 free bags up to 70 lb.",
+  "tips": [
+    "Atmos Rewards Visa cardholders and Atmos status members get free checked bags.",
+    "Club 49 members (Alaska residents) check 2 bags free.",
+    "Bag fees can be paid during online check-in, at a bag tag kiosk or at the counter."
+  ],
+  "links": [
+    { "title": "Checked bags", "url": "https://www.alaskaair.com/content/travel-info/baggage/checked-bags" },
+    { "title": "Check-in options", "url": "https://www.alaskaair.com/content/travel-info/at-the-airport/airport-check-in-options" }
+  ]
+}

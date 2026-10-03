@@ -1,0 +1,16 @@
+{
+  "iata": "F9",
+  "color": "#1E7B4D",
+  "hubs": ["DEN"],
+  "summary": "Denver-based ultra-low-cost airline: the fare covers your seat and one personal item, everything else is extra.",
+  "checkin": "Check-in opens 24 hours before departure. Check-in and bag drop close 1 hour before departure; ticket counters usually open 2 hours before.",
+  "baggage": "Free personal item up to 8 x 18 x 14 in. A carry-on (up to 10 x 16 x 24 in, 35 lb) and checked bags cost extra, alone or in a bundle. Prices vary by date and are higher at check-in and at the airport.",
+  "tips": [
+    "Buy bags when you book; they cost more later.",
+    "Bags from 41 to 50 lb are charged as overweight."
+  ],
+  "links": [
+    { "title": "Bag options", "url": "https://www.flyfrontier.com/travel/travel-info/bag-options/" },
+    { "title": "Check-in", "url": "https://faq.flyfrontier.com/help/check-in" }
+  ]
+}

@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -143,17 +142,14 @@ fun toneColor(t: Tone) = when (t) {
     Tone.Neutral -> C.secondary
 }
 
-/** Airline logo from a guide if one was added, else a colored monogram. */
+/** Airline emblem on its badge color if we have one, else a colored monogram. */
 @Composable
 fun AirlineBadge(code: String, size: Int = 28) {
-    val logo = remember(code) { Guides.airlineLogo(code) }
-    if (logo != null) {
-        Image(logo, code, Modifier.size(size.dp).clip(RoundedCornerShape((size / 4).dp)), contentScale = ContentScale.Fit)
-        return
-    }
-    val color = Guides.airlineColor(code)
-    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 4).dp)).background(color), contentAlignment = Alignment.Center) {
-        Text(code, color = Color.White, fontSize = (size * 0.42).sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    val icon = remember(code) { Guides.airlineIcon(code) }
+    val bg = if (icon != null) Guides.airlineIconBg(code) else Guides.airlineColor(code)
+    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 4).dp)).background(bg), contentAlignment = Alignment.Center) {
+        if (icon != null) Image(icon, code, Modifier.fillMaxSize())
+        else Text(code, color = Color.White, fontSize = (size * 0.42).sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 

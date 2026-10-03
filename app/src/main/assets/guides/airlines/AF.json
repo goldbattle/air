@@ -1,0 +1,16 @@
+{
+  "iata": "AF",
+  "color": "#002157",
+  "alliance": "SkyTeam",
+  "hubs": ["CDG"],
+  "summary": "France's flag carrier, hub at Paris-Charles de Gaulle; part of Air France-KLM.",
+  "checkin": "Online check-in opens 30 hours before departure.",
+  "baggage": "Economy cabin bags: 1 small bag plus 0 or 1 piece of hand baggage depending on the fare, 12 kg total. Light fares include no checked bag; one can be bought as an extra.",
+  "tips": [
+    "Pick your seat and get your boarding pass when you check in online."
+  ],
+  "links": [
+    { "title": "Baggage", "url": "https://wwws.airfrance.us/information/bagages/bagage-cabine-soute" },
+    { "title": "Check-in", "url": "https://wwws.airfrance.us/information/aeroport/enregistrement" }
+  ]
+}

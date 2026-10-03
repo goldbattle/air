@@ -1,0 +1,18 @@
+{
+  "iata": "AC",
+  "color": "#F01428",
+  "alliance": "Star Alliance",
+  "hubs": ["YYZ", "YUL", "YVR", "YYC"],
+  "summary": "Canada's largest airline, based in Montreal.",
+  "checkin": "Online and app check-in opens 24 hours before departure.",
+  "baggage": "Economy Basic fares within Canada, to/from the US, Mexico, Central America and the Caribbean include only a personal item, no carry-on; bags checked at the gate cost more. Basic fares also include no free checked bag.",
+  "tips": [
+    "Basic fare to Europe, Africa, the Middle East or South America (tickets after May 14, 2026): 1st bag CA/US$90, 2nd CA/US$120.",
+    "Aeroplan Elite status members get extra baggage benefits."
+  ],
+  "links": [
+    { "title": "Baggage fees", "url": "https://www.aircanada.com/ca/en/aco/home/legal/products-and-services.html" },
+    { "title": "Carry-on baggage", "url": "https://www.aircanada.com/ca/en/aco/home/plan/baggage/carry-on.html" },
+    { "title": "Check-in and boarding times", "url": "https://www.aircanada.com/ca/en/aco/home/plan/check-in-information/check-in-and-boarding-times.html" }
+  ]
+}
