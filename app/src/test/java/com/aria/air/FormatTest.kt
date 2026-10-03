@@ -1,5 +1,9 @@
 package com.aria.air
 
+import com.aria.air.data.*
+import com.aria.air.ui.screens.*
+import com.aria.air.ui.widget.*
+import com.aria.air.util.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

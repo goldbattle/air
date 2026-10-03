@@ -1,5 +1,8 @@
 package com.aria.air
 
+import com.aria.air.background.*
+import com.aria.air.data.*
+import com.aria.air.util.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,7 +12,7 @@ import org.junit.Test
 class TrackerTest : AirTest() {
     @Test
     fun checkCadence() {
-        fun next(vararg f: Flight) = TrackWorker.nextCheckMinutes(f.toList(), NOW)
+        fun next(vararg f: Flight) = Tracker.nextCheckMinutes(f.toList(), NOW)
         assertEquals(30L, next(flight(hours(48))))                  // days away
         assertEquals(10L, next(flight(hours(8))))                   // the countdown notification is up
         assertEquals(5L, next(flight(hours(3))))                    // leaving for the airport
@@ -24,11 +27,11 @@ class TrackerTest : AirTest() {
 
     @Test
     fun whichFlightsTheWorkerFollows() {
-        assertTrue(TrackWorker.tracked(flight(hours(24 * 30)), NOW))                        // mine, far out
-        assertFalse(TrackWorker.tracked(flight(hours(24)).copy(friend = "Sam"), NOW))       // a friend's, not yet
-        assertTrue(TrackWorker.tracked(flight(hours(5)).copy(friend = "Sam"), NOW))
-        assertFalse(TrackWorker.tracked(flight(hours(-24)), NOW))                           // done
-        assertTrue(TrackWorker.tracked(flight(null).copy(date = localToday()), NOW))        // maybe flying today
+        assertTrue(Tracker.tracked(flight(hours(24 * 30)), NOW))                        // mine, far out
+        assertFalse(Tracker.tracked(flight(hours(24)).copy(friend = "Sam"), NOW))       // a friend's, not yet
+        assertTrue(Tracker.tracked(flight(hours(5)).copy(friend = "Sam"), NOW))
+        assertFalse(Tracker.tracked(flight(hours(-24)), NOW))                           // done
+        assertTrue(Tracker.tracked(flight(null).copy(date = localToday()), NOW))        // maybe flying today
     }
 
     @Test

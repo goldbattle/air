@@ -1,5 +1,9 @@
 package com.aria.air
 
+import com.aria.air.api.*
+import com.aria.air.data.*
+import com.aria.air.sync.*
+import com.aria.air.util.*
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -20,12 +24,12 @@ class RoutesTest : AirTest() {
 
     @Before
     fun fakeNetwork() {
-        Api.http = { url, _ -> requested += url; responses.entries.firstOrNull { it.key in url }?.value ?: throw Api.HttpError(404, "HTTP 404") }
+        Http.transport = { url, _ -> requested += url; responses.entries.firstOrNull { it.key in url }?.value ?: throw HttpError(404, "HTTP 404") }
     }
 
     @After
     fun restore() {
-        Api.http = { _, _ -> error("no network in tests") }
+        Http.transport = { _, _ -> error("no network in tests") }
     }
 
     private val sfo get() = Db.airport("SFO")!!
@@ -44,11 +48,11 @@ class RoutesTest : AirTest() {
                 .put(JSONArray("[0, 37.7, -122.3, 2000, 200, 60, 2, 1500, {\"flight\": \"UAL100\"}]"))
                 .put(JSONArray("[9000, 41.0, -95.0, 37000, 480, 80, 0, 0, null]"))
                 .put(JSONArray("[18000, 42.3, -71.1, 2500, 160, 90, 0, -800, null]"))).toString()
-        val legs = Routes.fetch(f)
+        val legs = PastRoutes.fetch(f)
         assertEquals(1, legs.size)
         assertEquals(t0, legs[0].first().t)
         Prefs.adbKey = ""
-        assertTrue(Routes.fetch(f).isEmpty()) // no key: no lookups for other days
+        assertTrue(PastRoutes.fetch(f).isEmpty()) // no key: no lookups for other days
     }
 
     @Test
@@ -61,13 +65,13 @@ class RoutesTest : AirTest() {
             .put(JSONArray("[9000, 41.5, -100.0, 37000, 480, 80, 0, 0, null]"))
             .put(JSONArray("[18600, 40.47, -80.30, 2200, 150, 100, 0, -700, null]"))
             .put(JSONArray("[18900, 40.49, -80.23, \"ground\", 15, 100, 0, 0, null]")))
-        val i = Routes.arrivedHere(trace.toString(), ours, NOW)!!
+        val i = AdsbLol.arrivedHere(trace.toString(), ours, NOW)!!
         assertEquals("UAL1300", i.callsign); assertEquals("SFO", i.from); assertEquals("PIT", i.to)
         assertTrue(i.onGround)
         assertEquals(Instant.ofEpochSecond(t0 + 18600 + 180), i.landedAt)
         assertTrue(ours.copy(inbound = i).inboundHere())
         // A previous leg that ended somewhere else isn't our inbound.
-        assertNull(Routes.arrivedHere(trace.toString(), ours.copy(from = "ORD"), NOW))
+        assertNull(AdsbLol.arrivedHere(trace.toString(), ours.copy(from = "ORD"), NOW))
     }
     private val bos get() = Db.airport("BOS")!!
 
@@ -125,13 +129,13 @@ class RoutesTest : AirTest() {
             Triple("UAL100", yesterday, sfo to bos),
             Triple("UAL200", yesterday + 6 * 3600, bos to sfo),
         )
-        val legs = Routes.legsFrom(json, "UAL100", f)
+        val legs = AdsbLol.legsFrom(json, "UAL100", f)
         assertEquals(1, legs.size)
         assertEquals(yesterday, legs[0].first().t)
         assertTrue(distKm(legs[0].last().lat, legs[0].last().lon, bos.lat, bos.lon) < 50)
         assertTrue(legs[0].zipWithNext().all { (a, b) -> b.t - a.t >= TRACK_GAP })
         // Another flight's route under the same number: not a past path of ours.
-        assertTrue(Routes.legsFrom(json, "UAL100", flight(hours(24), from = "SFO", to = "ORD")).isEmpty())
+        assertTrue(AdsbLol.legsFrom(json, "UAL100", flight(hours(24), from = "SFO", to = "ORD")).isEmpty())
     }
 
     @Test
@@ -139,7 +143,7 @@ class RoutesTest : AirTest() {
         val f = flight(hours(2)) // today's flight; the plane flew the number yesterday and is broadcasting it now
         responses["/v2/callsign/UAL100"] = """{"ac":[{"hex":"abc123","flight":"UAL100  ","lat":37.6,"lon":-122.4}]}"""
         responses["/data/traces/23/trace_full_abc123.json"] = trace(Triple("UAL100", yesterday, sfo to bos), Triple("UAL100", NOW.epochSecond + 7200, sfo to bos))
-        val legs = Routes.fetch(f)
+        val legs = PastRoutes.fetch(f)
         assertEquals(1, legs.size)
         assertEquals(yesterday, legs[0].first().t)
         assertTrue(requested.any { it == "https://adsb.lol/data/traces/23/trace_full_abc123.json" })
@@ -152,22 +156,22 @@ class RoutesTest : AirTest() {
         val f = flight(hours(-6)).copy(depActual = NOW.minus(hours(6)), arrActual = NOW.minus(hours(1)), hex = "abc123",
             track = listOf(Pt(41.0, -95.0, 35000, dep + 2 * 3600)))
         responses["/data/traces/23/trace_full_abc123.json"] = trace(Triple("UAL100", dep, sfo to bos))
-        val n = Routes.fillTrack(f, auto = true)
+        val n = FlownTrack.fill(f, auto = true)
         assertNotNull(n.trackAt)
         assertTrue(n.track.size > 100)
         assertTrue(distKm(n.track.first().lat, n.track.first().lon, sfo.lat, sfo.lon) < 50)
         assertTrue(n.track.any { it.t == dep + 2 * 3600 }) // our own breadcrumb kept
-        assertFalse(Routes.trackDue(n, NOW, auto = false)) // complete: never again
+        assertFalse(FlownTrack.due(n, NOW, auto = false)) // complete: never again
         // Two weeks ago, on the refresh button: the daily history files of its UTC days.
         requested.clear()
         val twoWeeks = java.time.Duration.ofDays(14)
         val old = flight(twoWeeks.negated()).copy(id = "old", date = TODAY.minusDays(14), depActual = NOW.minus(twoWeeks),
             arrActual = NOW.minus(twoWeeks).plus(hours(5)), hex = "abc123")
-        Routes.fillTrack(old, auto = false)
+        FlownTrack.fill(old, auto = false)
         assertEquals(listOf("https://adsb.lol/globe_history/2026/09/18/traces/23/trace_full_abc123.json"), requested)
         // Not automatically for long-gone flights, nor ever past adsb.lol's history.
-        assertFalse(Routes.trackDue(old, NOW, auto = true))
-        assertFalse(Routes.trackDue(old.copy(arrActual = NOW.minus(java.time.Duration.ofDays(40))), NOW, auto = false))
+        assertFalse(FlownTrack.due(old, NOW, auto = true))
+        assertFalse(FlownTrack.due(old.copy(arrActual = NOW.minus(java.time.Duration.ofDays(40))), NOW, auto = false))
     }
 
     @Test

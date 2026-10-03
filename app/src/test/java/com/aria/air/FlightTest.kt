@@ -1,5 +1,7 @@
 package com.aria.air
 
+import com.aria.air.data.*
+import com.aria.air.util.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -154,22 +156,22 @@ class FlightTest : AirTest() {
     @Test
     fun liveFixMustFitTheClock() {
         val f = flight(hours(2))
-        assertFalse(Api.plausible(f, fix(f, 30)))  // not due to leave for 2 h: a plane mid-route is another flight
-        assertTrue(Api.plausible(f, fix(f, 0).copy(onGround = true, altFt = 0, speedKt = 5)))  // at the gate
-        assertFalse(Api.plausible(f, fix(f, 0)))   // in the air over the airport before departure: arriving, not us
+        assertFalse(plausible(f, fix(f, 30)))  // not due to leave for 2 h: a plane mid-route is another flight
+        assertTrue(plausible(f, fix(f, 0).copy(onGround = true, altFt = 0, speedKt = 5)))  // at the gate
+        assertFalse(plausible(f, fix(f, 0)))   // in the air over the airport before departure: arriving, not us
         val g = flight(hours(-1))
-        assertTrue(Api.plausible(g, fix(g, 25)))   // an hour after departure, ~1,100 km out: fits
-        assertFalse(Api.plausible(g, fix(g, 80)))  // an hour after departure, ~3,500 km out: impossible
-        assertTrue(Api.plausible(flight(null), fix(g, 80)))  // no schedule: only the route is checked
+        assertTrue(plausible(g, fix(g, 25)))   // an hour after departure, ~1,100 km out: fits
+        assertFalse(plausible(g, fix(g, 80)))  // an hour after departure, ~3,500 km out: impossible
+        assertTrue(plausible(flight(null), fix(g, 80)))  // no schedule: only the route is checked
     }
 
     @Test
     fun offRouteIsNotUs() {
         val f = flight(hours(-1))
         val mia = Db.airport("MIA")!!
-        assertFalse(Api.onRoute(f, Live(mia.lat, mia.lon, 35000, 480, 90.0, 0, NOW, false)))
-        assertTrue(Api.onRoute(f, fix(f, 50)))
-        assertTrue(Api.onRoute(f.copy(to = "???"), Live(0.0, 0.0, 0, 0, 0.0, 0, NOW, false))) // unknown airport: can't tell
+        assertFalse(onRoute(f, Live(mia.lat, mia.lon, 35000, 480, 90.0, 0, NOW, false)))
+        assertTrue(onRoute(f, fix(f, 50)))
+        assertTrue(onRoute(f.copy(to = "???"), Live(0.0, 0.0, 0, 0, 0.0, 0, NOW, false))) // unknown airport: can't tell
     }
 
     @Test

@@ -1,6 +1,10 @@
 package com.aria.air
 
-import android.app.Application
+// The one activity: handles notification taps and shares, and hosts the tabs and screen stack.
+
+import com.aria.air.data.*
+import com.aria.air.ui.components.*
+import com.aria.air.ui.screens.*
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -36,55 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
-
-class App : Application() {
-    override fun onCreate() {
-        super.onCreate()
-        Prefs.init(this)
-        Db.load(this)
-        Land.load(this)
-        Guides.init(this)
-        Store.init(this)
-        Radar.init(this)
-        WxMaps.init(this)
-        Routes.init(this)
-        Mail.init(this)
-        Debug.init(this)
-        Store.onChange = { scope.launch { FlightWidget.refresh(this@App) } }
-        Notify.channels(this)
-        TrackWorker.schedule(this)
-        Updater.schedule(this)
-        scope.launch { Api.backfillWeather() }
-    }
-
-    companion object {
-        /** Outlives screens, so lookups and imports finish when you navigate away. */
-        val scope = MainScope()
-    }
-}
-
-enum class Tab { Flights, Friends, Passport, Settings }
-
-sealed class Screen {
-    data class FlightDetail(val id: String) : Screen()
-    data class Add(val friend: Boolean, val found: List<Found>? = null, val error: String? = null) : Screen()
-    data class AirportInfo(val code: String) : Screen()
-    data class AirlineInfo(val code: String) : Screen()
-    data object MailAccounts : Screen()
-    data object MailFound : Screen()
-}
-
-object Nav {
-    var tab by mutableStateOf(Tab.Flights)
-    val stack = mutableStateListOf<Screen>()
-    fun push(s: Screen) { stack += s }
-    fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
-    /** Swaps the top screen, so Back skips it (moving between legs of a connection). */
-    fun replace(s: Screen) { if (stack.isEmpty()) push(s) else stack[stack.lastIndex] = s }
-    fun open(tab: Tab) { this.tab = tab; stack.clear() }
-}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

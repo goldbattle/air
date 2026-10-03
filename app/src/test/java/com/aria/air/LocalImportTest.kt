@@ -1,5 +1,7 @@
 package com.aria.air
 
+import com.aria.air.data.*
+import com.aria.air.importer.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
