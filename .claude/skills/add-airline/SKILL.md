@@ -7,7 +7,7 @@ description: Add or update a bundled airline guide in the Air app (brand color, 
 
 Guides live in `app/src/main/assets/guides/airlines/<IATA>.json`; an icon goes in `app/src/main/assets/airline-icons/<IATA>.png`.
 The badge on every flight card shows that icon, else a monogram on the guide's `color`; the rest shows on the airline page
-(`AirlineScreen` in `AirportScreen.kt`). Everything is bundled; nothing is fetched at runtime.
+(`AirlineScreen` in `ui/screens/AirportScreen.kt`). Everything is bundled; nothing is fetched at runtime.
 
 ## Steps
 

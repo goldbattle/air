@@ -6,7 +6,7 @@ description: Add or update a bundled airport guide in the Air app (terminals, wh
 # Add an airport guide
 
 Guides live in `app/src/main/assets/guides/airports/<IATA>.json`, with images in
-`app/src/main/assets/guides/airports/<IATA>/`. The app reads them offline (`Guides` in `AirportScreen.kt`);
+`app/src/main/assets/guides/airports/<IATA>/`. The app reads them offline (`Guides` in `data/Guides.kt`, shown by `ui/screens/AirportScreen.kt`);
 nothing is fetched at runtime, so everything the page shows must be in these files.
 
 ## Steps
