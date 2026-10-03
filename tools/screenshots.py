@@ -402,32 +402,30 @@ def shade_card(f: dict) -> "Image.Image | None":
     time.sleep(25)
     shell("input keyevent KEYCODE_HOME")
     time.sleep(2)
-    xml = ""
-    for _ in range(8):  # a swipe from the top, as a person would; the statusbar command alone is unreliable
-        shell("input swipe 540 2 540 1600 300")
-        time.sleep(1)
-        shell("cmd statusbar expand-notifications")
-        time.sleep(3)
-        shell("uiautomator dump /sdcard/ui.xml", check=False)
-        xml = shell("cat /sdcard/ui.xml", check=False)
-        if "expandableNotificationRow" in xml:
-            break
+    shell("input swipe 540 2 540 1600 300")  # a swipe from the top, as a person would
+    time.sleep(1)
+    shell("cmd statusbar expand-notifications")
+    time.sleep(5)  # let the shade finish opening and settle
     path = OUT / "_shade.png"
     with open(path, "wb") as fh:
         subprocess.run([ADB, "exec-out", "screencap", "-p"], stdout=fh, check=True)
     shell("cmd statusbar collapse")
     shade = Image.open(path).convert("RGB")
+    if os.environ.get("AIR_SHOTS_DEBUG"):
+        shade.save(OUT / f"_debug_{f['airline']}{f['number']}.png")
     path.unlink()
-    label = f"{f['airline']} {f['number']}"
-    num = r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]"
-    rows = [tuple(map(int, m.groups())) for m in re.finditer(r'expandableNotificationRow"[^>]*?bounds="' + num, xml)]
-    texts = [(m.group(1), *map(int, m.groups()[1:])) for m in re.finditer(r'text="([^"]*)"[^>]*?bounds="' + num, xml)]
-    hits = [r for r in rows if any(label in t and r[0] <= (x0 + x1) / 2 <= r[2] and r[1] <= (y0 + y1) / 2 <= r[3]
-                                   for t, x0, y0, x1, y1 in texts)]
-    if not hits:
-        print(f"  ! no notification for {label}")
+    # The UI dump misses the shade on the emulator, so find the first card (Air's ongoing notification sorts first)
+    # by its color: down the middle to its top, then down its edge to the gap below it.
+    w, h = shade.size
+    card = shade.getpixel((w // 2, int(h * 0.30)))
+    def near(a, b): return sum(abs(x - y) for x, y in zip(a, b)) < 12
+    top = next((y for y in range(int(h * 0.15), int(h * 0.6)) if near(shade.getpixel((w // 2, y)), card)), None)
+    if top is None:
+        print(f"  ! no notification card found for {f['airline']} {f['number']}")
         return None
-    return shade.crop(min(hits, key=lambda r: r[3] - r[1]))
+    bottom = next((y for y in range(top + 60, h) if not near(shade.getpixel((w // 18, y)), card)
+                   and not near(shade.getpixel((w // 18, y + 2)), card)), h)
+    return shade.crop((w // 25, top, w - w // 25, bottom))
 
 
 def notification_stages() -> None:
