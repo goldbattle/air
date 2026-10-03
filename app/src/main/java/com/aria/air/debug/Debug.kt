@@ -24,11 +24,13 @@ import java.time.format.DateTimeFormatter
  * unless you copy or share a report yourself. API keys are never logged.
  */
 object Debug {
+    /** Whether developer options are on (seven taps on the version in Settings › About). */
     val on get() = Prefs.flag("dev", default = false)
     private var file: File? = null
     private val stamp = DateTimeFormatter.ofPattern("MMM d HH:mm:ss").withZone(ZoneId.systemDefault())
     private const val KEEP = 300 // lines
 
+    /** Points the log at files/debug.log; call once at startup. */
     fun init(ctx: Context) { file = File(ctx.filesDir, "debug.log") }
 
     /** One line in the log, when developer options are on. */
@@ -48,6 +50,7 @@ object Debug {
         note("GET ${url.substringAfter("://")}  $r  ${ms}ms")
     }
 
+    /** Where the last raw status response for [f] is kept. */
     private fun statusFile(f: Flight) = file?.parentFile?.let { File(it, "debug-${f.airline}${f.number}_${f.date}.json") }
 
     /** The latest raw status response for [f] (AeroDataBox or FlightAware), the one worth reading in full. */
@@ -55,8 +58,10 @@ object Debug {
         if (on) statusFile(f)?.writeText(body.ifBlank { "(empty: the service has no such flight that day)" })
     }
 
+    /** The whole request log, oldest first; "" when there's none. */
     fun log(): String = file?.takeIf { it.exists() }?.readText().orEmpty()
 
+    /** Deletes the log and the saved status responses. */
     fun clear() {
         val dir = file?.parentFile ?: return
         file?.delete()
@@ -100,11 +105,13 @@ object Debug {
         append(log())
     }
 
+    /** Copies [text] to the clipboard and says so. */
     fun copy(ctx: Context, text: String, what: String = "Debug report") {
         ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(what, text))
         Toast.makeText(ctx, "$what copied", Toast.LENGTH_SHORT).show()
     }
 
+    /** Opens the share sheet with [text]. */
     fun share(ctx: Context, text: String) = ctx.startActivity(
         Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share debug report"),
     )

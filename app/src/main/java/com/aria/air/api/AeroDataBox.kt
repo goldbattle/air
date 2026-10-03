@@ -18,6 +18,8 @@ import org.json.JSONObject
  */
 object AeroDataBox {
     private val adbTime = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mmX")
+
+    /** RapidAPI's auth headers for AeroDataBox. */
     internal fun headers(key: String) = mapOf("X-RapidAPI-Key" to key, "X-RapidAPI-Host" to "aerodatabox.p.rapidapi.com")
 
     /** Status from AeroDataBox (RapidAPI). Covers roughly a year back and a year ahead. */
@@ -82,6 +84,10 @@ object AeroDataBox {
         )
     }
 
+    /**
+     * Checks an AeroDataBox key with one cheap lookup. Returns null when it works, else what's wrong in words (rejected
+     * key, quota used up, no connection).
+     */
     suspend fun testKey(key: String): String? = withContext(Dispatchers.IO) {
         try {
             Http.get("https://aerodatabox.p.rapidapi.com/flights/number/UA900/${localToday()}?withAircraftImage=false&withLocation=false", headers(key)); null
@@ -95,6 +101,7 @@ object AeroDataBox {
             e.message ?: "No connection"
         }
     }
+
     /** The raw list of [f]'s flight number on [day] (empty body when it didn't fly), to learn which plane flew it. */
     fun flightsOn(f: Flight, day: java.time.LocalDate, key: String): String = Http.get(
         "https://aerodatabox.p.rapidapi.com/flights/number/${f.airline}${f.number}/$day?withAircraftImage=false&withLocation=false&dateLocalRole=Departure",

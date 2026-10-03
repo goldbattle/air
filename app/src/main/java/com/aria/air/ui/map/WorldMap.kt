@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.cos
 import kotlin.math.max
 
+/** A route to draw; [highlight] draws it on top, at full strength. */
 class MapRoute(val from: Airport, val to: Airport, val highlight: Boolean = false)
 
 /** Where the map looks: its center, pixels per degree of latitude, and the longitude squeeze at that latitude. */
@@ -45,6 +46,7 @@ fun WorldMap(
     routes: List<MapRoute>,
     modifier: Modifier = Modifier,
     focus: Boolean = false,
+
     /** Where the routes sit vertically when focused, as a fraction of the height (0.5 = centered). */
     centerY: Float = 0.5f,
     plane: Live? = null,
@@ -52,13 +54,17 @@ fun WorldMap(
     sea: Color = C.sea,
     line: Color = C.blue,
     dot: Color = C.blue,
+
     /** Extra layers in map coordinates (x(lon), y(lat)): [under] over the land and below the routes, [over] on top. */
     under: (DrawScope.(x: (Double) -> Float, y: (Double) -> Float) -> Unit)? = null,
     over: (DrawScope.(x: (Double) -> Float, y: (Double) -> Float) -> Unit)? = null,
-    /** Flown, planned and past paths of one flight (Routes.kt); null draws [routes] as plain arcs. */
+
+    /** Flown, planned and past paths of one flight (Track.kt); null draws [routes] as plain arcs. */
     paths: MapPaths? = null,
+
     /** Color of other runs' paths. */
     pastRoute: Color = C.secondary.copy(alpha = 0.55f),
+
     /** Look here instead of fitting the routes (the zoomable full-screen map); [onFit] reports the fitted view. */
     camera: Camera? = null,
     onFit: ((Camera) -> Unit)? = null,

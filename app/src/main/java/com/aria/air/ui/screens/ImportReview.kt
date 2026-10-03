@@ -282,4 +282,5 @@ private fun ReviewCell(title: String, value: String?, auto: Boolean, empty: Stri
     Icon(Icons.Filled.ChevronRight, null, tint = C.tertiary)
 }
 
+/** "9:05 AM". */
 private fun fmt(t: LocalTime) = t.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))

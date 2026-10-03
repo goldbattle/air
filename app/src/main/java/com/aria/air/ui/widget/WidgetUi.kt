@@ -44,8 +44,10 @@ import java.time.Duration
 import java.time.Instant
 import kotlin.math.roundToInt
 
+/** The widget's colors, light and dark; Glance picks by the system theme. */
 private object W {
     val bg = DayNight(Color.White, Color(0xFF1C1C1E))
+
     /** Translucent, so the wallpaper shows through like the iOS widgets. */
     val glass = DayNight(Color(0xC7FFFFFF), Color(0xB31C1C1E))
     val label = DayNight(Color.Black, Color.White)
@@ -80,6 +82,7 @@ internal fun headline(f: Flight, now: Instant): Pair<String, String> {
     }
 }
 
+/** The widget color for a [Tone]. */
 private fun toneProvider(t: Tone) = when (t) {
     Tone.Good -> W.green
     Tone.Warn -> W.orange
@@ -88,6 +91,7 @@ private fun toneProvider(t: Tone) = when (t) {
     Tone.Neutral -> W.secondary
 }
 
+/** Whether the system is in dark mode, for the route bitmap (Glance colors switch on their own; a bitmap doesn't). */
 private fun isNight(ctx: Context) =
     (ctx.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
 
@@ -105,7 +109,7 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
     val night = isNight(ctx)
     val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
     val c = android.graphics.Canvas(bmp)
-    // Once there's a recorded path (Routes.kt), the line is that, then the plan from the plane on; split at the plane.
+    // Once there's a recorded path (Track.kt), the line is that, then the plan from the plane on; split at the plane.
     val mp = f.paths(emptyList(), emptyList(), 0)
     val flown = mp.flown.size
     val arc = if (flown < 2) greatCircle(o.lat, o.lon, d.lat, d.lon, 96) else unwrap(mp.flown + mp.rest.drop(1), o.lon)
@@ -200,6 +204,10 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
     return bmp
 }
 
+/**
+ * The widget: the route bitmap behind, then the small or wide layout by size, or an empty state. Tapping it opens the
+ * flight.
+ */
 @Composable
 internal fun WidgetContent(ctx: Context) {
     val f = widgetFlight()
@@ -221,6 +229,7 @@ internal fun WidgetContent(ctx: Context) {
     }
 }
 
+/** "No upcoming flights". */
 @Composable
 private fun Empty() = Column(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalAlignment = Alignment.CenterHorizontally) {
     Image(ImageProvider(R.drawable.ic_plane), null, GlanceModifier.size(28.dp), colorFilter = ColorFilter.tint(W.secondary))
@@ -228,6 +237,7 @@ private fun Empty() = Column(GlanceModifier.fillMaxSize(), verticalAlignment = A
     Text("No upcoming flights", style = TextStyle(color = W.secondary, fontSize = 13.sp, textAlign = TextAlign.Center))
 }
 
+/** The airline's emblem, or its code on its color. */
 @Composable
 private fun AirlineChip(f: Flight) {
     val icon = Guides.airlineIcon(f.airline)
@@ -251,6 +261,7 @@ internal fun detailLine(f: Flight): String {
     ).joinToString(" · ")
 }
 
+/** The small widget: the flight, the big countdown, and the time or what's next. */
 @Composable
 private fun Small(f: Flight) {
     val now = Instant.now()
@@ -276,6 +287,10 @@ private fun Small(f: Flight) {
     }
 }
 
+/**
+ * The wide widget: flight, city and status on top, the big countdown, both ends' times and details; [weather] (the
+ * large size) adds both ends' weather.
+ */
 @Composable
 private fun Wide(f: Flight, weather: Boolean) {
     val now = Instant.now()
@@ -323,6 +338,7 @@ private fun Wide(f: Flight, weather: Boolean) {
     }
 }
 
+/** One airport's weather in the large widget. */
 @Composable
 private fun WeatherHalf(code: String, w: Wx?, modifier: GlanceModifier) = Row(modifier, verticalAlignment = Alignment.CenterVertically) {
     Text(w?.icon() ?: "", style = TextStyle(fontSize = 22.sp))

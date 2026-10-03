@@ -19,15 +19,21 @@ object Guides {
     private val cache = mutableMapOf<String, JSONObject?>()
     private val images = mutableMapOf<String, ImageBitmap?>()
 
+    /** Remembers the app's assets; call once at startup. */
     fun init(ctx: Context) { assets = ctx.assets }
 
+    /** A guide file, parsed once and cached; null when it isn't bundled. */
     private fun json(path: String): JSONObject? = cache.getOrPut(path) {
         runCatching { JSONObject(assets.open(path).bufferedReader().readText()) }.getOrNull()
     }
 
+    /** The guide for an airport (IATA code), or null when none is bundled. */
     fun airport(code: String) = json("guides/airports/${code.uppercase()}.json")
+
+    /** The guide for an airline (IATA code), or null when none is bundled. */
     fun airline(code: String) = json("guides/airlines/${code.uppercase()}.json")
 
+    /** A bundled image, decoded once and cached; null when missing. */
     fun image(path: String): ImageBitmap? = images.getOrPut(path) {
         runCatching { assets.open(path).use { BitmapFactory.decodeStream(it).asImageBitmap() } }.getOrNull()
     }
@@ -40,6 +46,9 @@ object Guides {
 
     private val palette = listOf(0xFF0A84FF, 0xFF5E5CE6, 0xFFFF375F, 0xFF30B0C7, 0xFFFF9F0A, 0xFF34C759, 0xFFAF52DE, 0xFF8E8E93)
 
+    /**
+     * The airline's brand color from its guide, else a color picked from its code, so it stays the same every launch.
+     */
     fun airlineColor(code: String): Color =
         airline(code)?.optString("color")?.takeIf { it.startsWith("#") }?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
             ?: Color(palette[Math.floorMod(code.hashCode(), palette.size)])

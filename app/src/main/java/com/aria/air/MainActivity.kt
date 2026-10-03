@@ -42,6 +42,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.launch
 
+/**
+ * The one activity. Follows the system's dark mode, routes the intent it was opened with (a notification tap, the mail
+ * notification, or something shared to Air), and hosts the tab bar and the screen stack.
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +78,10 @@ class MainActivity : ComponentActivity() {
         importInto(this, stream, text, friend = false)
     }
 
+    /**
+     * The app's content: asks for notification permission once, maps Back to popping the stack (then to the Flights
+     * tab), and shows the top screen over the current tab.
+     */
     @Composable
     private fun Root() {
         val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -115,9 +123,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Whether the keyboard is up, so the tab bar can step aside while typing. */
 @Composable
 private fun WindowInsets.Companion.isImeVisibleCompat(): Boolean = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
 
+/** The bottom tab bar. Friends gets a green dot while a friend is in the air. */
 @Composable
 private fun TabBar() {
     Column(Modifier.fillMaxWidth().background(C.bar)) {
@@ -131,6 +141,7 @@ private fun TabBar() {
     }
 }
 
+/** One tab: icon and label, blue when selected, with an optional status [dot]. */
 @Composable
 private fun RowScope.TabItem(tab: Tab, label: String, icon: ImageVector, dot: Color? = null) {
     val selected = Nav.tab == tab

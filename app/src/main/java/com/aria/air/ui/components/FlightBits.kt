@@ -34,6 +34,7 @@ fun rememberNow(): Instant {
     return now
 }
 
+/** The app color for a [Tone]. */
 fun toneColor(t: Tone) = when (t) {
     Tone.Good -> C.green
     Tone.Warn -> C.orange

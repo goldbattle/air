@@ -16,10 +16,15 @@ import java.time.Duration
 import java.time.Instant
 import kotlin.math.roundToInt
 
+/**
+ * Every notification about flights: the ongoing Live Update per flight, alerts when something changes, and reminders.
+ * Each alert fires once, remembered in the flight's [Flight.alerted] list.
+ */
 object Notify {
     private const val LIVE = "live"
     private const val ALERTS = "alerts"
 
+    /** Creates the two channels, quiet live progress and high-priority alerts. Safe to call on every start. */
     fun channels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(LIVE, "Live flight progress", NotificationManager.IMPORTANCE_DEFAULT).apply {
@@ -31,15 +36,20 @@ object Notify {
         })
     }
 
+    /** Tapping a flight's notification opens its page. */
     private fun open(ctx: Context, f: Flight) = PendingIntent.getActivity(
         ctx, f.id.hashCode(),
         Intent(ctx, MainActivity::class.java).putExtra("flight", f.id).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    /** "Sam · " before a friend's flight, nothing before mine. */
     private fun who(f: Flight) = if (f.mine) "" else "${f.friend} · "
 
+    /** Whether live progress is on for this kind of flight (mine or friends', Settings › Notifications). */
     private fun liveEnabled(f: Flight) = Prefs.flag(if (f.mine) "liveMine" else "liveFriends")
+
+    /** Whether alerts are on for this kind of flight. */
     private fun alertsEnabled(f: Flight) = Prefs.flag(if (f.mine) "alertsMine" else "alertsFriends")
 
     /**
@@ -145,12 +155,14 @@ object Notify {
         nm.notify(id, b.build())
     }
 
+    /** Removes live cards of flights that no longer want one (finished, deleted, or switched off). */
     fun cleanup(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val keep = Store.flights.filter { wantsLive(it) }.map { it.id.hashCode() }.toSet()
         nm.activeNotifications.filter { it.notification.channelId == LIVE && it.id !in keep }.forEach { nm.cancel(it.id) }
     }
 
+    /** Posts one alert for [f]. Each [key] gets its own notification, so a gate change doesn't replace a delay. */
     private fun alert(ctx: Context, f: Flight, key: String, title: String, text: String) {
         ctx.getSystemService(NotificationManager::class.java).notify(
             (f.id + key).hashCode(),

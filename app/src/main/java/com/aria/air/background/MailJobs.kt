@@ -41,6 +41,7 @@ object MailJobs {
         WorkManager.getInstance(ctx).enqueueUniqueWork("mailNow", ExistingWorkPolicy.KEEP, req)
     }
 
+    /** Posts "N flights found in your email"; tapping it opens the found-emails page. */
     fun notify(ctx: Context, flights: Int) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("mail", "Flights found in email", NotificationManager.IMPORTANCE_DEFAULT))
@@ -55,6 +56,7 @@ object MailJobs {
                 .setContentText("Tap to choose which to import").setContentIntent(open).setAutoCancel(true).build(),
         )
     }
+
     /** One scan of every account; notifies about new flights when [notify] (the scheduled scans). */
     suspend fun run(ctx: Context, notify: Boolean) {
         val n = Mail.scanAll(ctx)

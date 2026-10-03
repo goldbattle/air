@@ -23,6 +23,10 @@ import kotlinx.coroutines.withContext
 
 /** Everything here runs on the phone: Android's PDF text layer, and ML Kit's bundled OCR model for images. */
 object Importer {
+    /**
+     * The readable text of a shared or picked file: a PDF's text (OCR for scans), OCR for images, else the file as text
+     * with HTML stripped.
+     */
     suspend fun text(ctx: Context, uri: Uri): String = withContext(Dispatchers.IO) {
         val mime = ctx.contentResolver.getType(uri).orEmpty()
         when {
@@ -32,7 +36,6 @@ object Importer {
         }
     }
 
-    /** Text layer of each page; pages without one (scans) are rendered and OCR'd. */
     /**
      * The PDF's text layer. Only when the whole document has none (a scan or a photo saved as PDF) are pages rendered
      * and OCR'd; emails printed to PDF often have picture-only pages (logos, ads) that aren't worth reading.
@@ -58,6 +61,7 @@ object Importer {
         }
     }
 
+    /** Runs ML Kit's on-device text recognition on one image. */
     private fun ocr(img: InputImage): String {
         val client = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
         return try { Tasks.await(client.process(img)).text } finally { client.close() }
@@ -84,6 +88,7 @@ object Importer {
     private val dayMonth = Regex("(?i)\\b(\\d{1,2})\\s?($MONTHS)[a-z]*\\.?,?\\s?(\\d{4}|\\d{2}(?![\\d:]))?")
     private val usDate = Regex("\\b(\\d{1,2})/(\\d{1,2})/(\\d{4}|\\d{2})\\b")
     private val ymdSlash = Regex("\\b(\\d{4})/(\\d{1,2})/(\\d{1,2})\\b")
+
     /** "Portland, ME" / "London, GB": a city and a state or country code, as Delta and others write airports. */
     private val cityRe = Regex("([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+){0,3}), ([A-Z]{2})\\b")
     private const val NAME = "[A-Za-z][A-Za-z'.-]*(?:[ \\t]+[A-Za-z][A-Za-z'.-]*){0,3}"
@@ -105,13 +110,20 @@ object Importer {
         "FEE", "ALL", "NEW", "ONE", "TWO", "ADT", "CHD", "INF", "OUT", "OFF", "VIA", "TSA", "CEO", "APP", "WEB", "AIR",
     )
 
+    /** The month for a name or abbreviation ("Oct", "October"). */
     private fun month(s: String) = Month.entries.first { it.getDisplayName(TextStyle.SHORT, Locale.US).equals(s.take(3), true) }
+
+    /** A year written with 2 or 4 digits, or [today]'s year when missing. */
     private fun year(s: String?, today: LocalDate) = when {
         s == null -> today.year
         s.length == 2 -> 2000 + s.toInt()
         else -> s.toInt()
     }
 
+    /**
+     * Every date in [text] with its position, in any of the usual formats. Dates without a year take it from the first
+     * full date (usually when the email was sent).
+     */
     private fun dates(text: String, today: LocalDate): List<Pair<Int, LocalDate>> {
         val out = mutableListOf<Triple<Int, LocalDate, Boolean>>() // position, date, had a year
         fun add(pos: Int, hasYear: Boolean = true, f: () -> LocalDate) { runCatching(f).getOrNull()?.let { out += Triple(pos, it, hasYear) } }
@@ -129,6 +141,7 @@ object Importer {
         }
     }
 
+    /** Times of day in the order they appear, 12- or 24-hour. */
     private fun times(s: String): List<LocalTime> = timeRe.findAll(s).mapNotNull { m ->
         var h = m.groupValues[1].toInt()
         val min = m.groupValues[2].toInt()
@@ -139,13 +152,6 @@ object Importer {
         if (h in 0..23 && min in 0..59) LocalTime.of(h, min) else null
     }.toList()
 
-    /**
-     * Pulls flights out of a confirmation email, e-ticket or boarding pass. Each flight number that belongs to a known
-     * airline starts a segment; the date is the nearest one before it, times and airports are the first ones in its
-     * segment.
-     */
-    // ponytail: regex heuristics, not a model. Handles the common airline formats; an on-device LLM
-    // (Gemini Nano via ML Kit GenAI) is the upgrade path for messy layouts.
     /** Ligatures ("ﬁ"), narrow no-break spaces before AM/PM and the like, folded to plain text. */
     fun clean(text: String): String = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC).replace(' ', ' ')
 
@@ -191,8 +197,19 @@ object Importer {
      */
     private val noise = Regex("(?i)(?:https?://|www\\.)\\S+|(?<!\\S)(?=\\S*[%=&?_+/])\\S{30,}")
 
+    /**
+     * [text] with links and long encoded runs blanked out (same length, so positions don't shift), so they can't pass
+     * for flight numbers.
+     */
     fun denoise(text: String): String = noise.replace(text) { " ".repeat(it.value.length) }
 
+    // ponytail: regex heuristics, not a model. Handles the common airline formats; an on-device LLM
+    // (Gemini Nano via ML Kit GenAI) is the upgrade path for messy layouts.
+    /**
+     * Pulls flights out of a confirmation email, e-ticket or boarding pass. Each flight number that belongs to a known
+     * airline starts a segment; the date is the nearest one before it, times and airports are the first ones in its
+     * segment. [today] anchors dates written without a year. Returns each flight and date once, best mention kept.
+     */
     fun parse(text: String, today: LocalDate = LocalDate.now()): List<Found> {
         val t = denoise(clean(text))
         val flights = flightRe.findAll(t).filter { m ->
@@ -253,5 +270,6 @@ object Importer {
         else out.filter { (k, f) -> k in routed || f.airline in airlines && f.date != null }.values.toList()
     }
 
+    /** How complete one mention of a flight is, to keep the best of several. */
     private fun score(f: Found) = listOf(f.date, f.from, f.to, f.dep, f.arr).count { it != null } + (if (f.seat.isNotEmpty()) 1 else 0)
 }

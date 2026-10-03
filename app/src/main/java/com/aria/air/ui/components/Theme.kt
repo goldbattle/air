@@ -11,8 +11,11 @@ import androidx.compose.ui.graphics.Color
 
 // ---------- Colors (iOS system palette) ----------
 
+/** The app's colors (the iOS system palette), light or dark by [dark], which follows the system at launch. */
 object C {
     var dark = false
+
+    /** The light or dark variant, by the current mode. */
     private fun pick(light: Long, dark: Long) = Color(if (this.dark) dark else light)
 
     val bg get() = pick(0xFFF2F2F7, 0xFF000000)
@@ -33,6 +36,7 @@ object C {
     val sea get() = pick(0xFFF7F8FA, 0xFF111113)
 }
 
+/** Material 3 with [C]'s colors, so stock pieces (dialogs, switches, menus) match the rest of the app. */
 @Composable
 fun AppTheme(content: @Composable () -> Unit) = MaterialTheme(
     colorScheme = (if (C.dark) darkColorScheme() else lightColorScheme()).copy(

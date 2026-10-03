@@ -22,7 +22,12 @@ fun Flight.mergedWith(o: Flight) = copy(
     depWx = depWx ?: o.depWx, arrWx = arrWx ?: o.arrWx, routeWx = routeWx ?: o.routeWx, track = track.ifEmpty { o.track },
 )
 
+/**
+ * Flights saved twice (a re-import, a codeshare, a friend on the same plane): finding them, merging them, or marking
+ * them as not duplicates for good (Prefs "dupIgnore").
+ */
 object Dupes {
+    /** A pair's id, the same whichever order the two come in. */
     private fun key(a: Flight, b: Flight) = listOf(a.id, b.id).sorted().joinToString("+")
     private val ignored get() = Prefs["dupIgnore"].split(',').filter { it.isNotEmpty() }.toSet()
 
@@ -57,6 +62,7 @@ object Dupes {
         group.filter { it.id != keep.id }.forEach { Store.remove(it.id) }
     }
 
+    /** Marks every pair in [group] as "not duplicates", so the group never shows again. */
     fun ignore(group: List<Flight>) {
         val pairs = group.flatMap { a -> group.filter { it.id != a.id }.map { b -> key(a, b) } }
         Prefs["dupIgnore"] = (ignored + pairs).joinToString(",")

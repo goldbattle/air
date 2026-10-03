@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 object FlownTrack {
     private val trackTries = ConcurrentHashMap<String, Pair<Instant, Int>>()
 
+    /** When [f] landed, or is taken to have landed (past the arrival without an actual time), else null. */
     private fun landedAt(f: Flight, now: Instant): Instant? = f.arrActual ?: (f.arr ?: f.arrGuess).takeIf { f.phase(now) >= Phase.Arrival }
 
     /**

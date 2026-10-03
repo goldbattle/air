@@ -22,12 +22,15 @@ import org.json.JSONObject
  * and FlightAware as the fallback; kept in a small cache file (routes.json), not in backups.
  */
 object PastRoutes {
+    /** Past paths per [routeKey], as Compose state so the map redraws when they arrive. */
     val cache = mutableStateMapOf<String, Typical>()
     internal var file: File? = null
     private val lastTry = ConcurrentHashMap<String, Instant>()
+
     /** Planes seen flying the number, to read their trace once they've landed (an unfinished leg isn't kept). */
     private val hexes = ConcurrentHashMap<String, List<String>>()
 
+    /** Loads the cache from files/routes.json, leaving out entries over 30 days old; call once at startup. */
     fun init(ctx: Context) {
         val f = File(ctx.filesDir, "routes.json").also { file = it }
         if (!f.exists()) return
@@ -43,6 +46,7 @@ object PastRoutes {
         }
     }
 
+    /** Writes the cache back (a temp file, then renamed over the old one). */
     private fun save() {
         val f = file ?: return
         val j = JSONObject()
@@ -56,6 +60,7 @@ object PastRoutes {
     fun due(f: Flight, now: Instant): Boolean = !f.cancelled &&
         cache[f.routeKey]?.let { Duration.between(it.at, now) >= Duration.ofDays(1) } != false &&
         lastTry[f.routeKey]?.let { Duration.between(it, now) >= Duration.ofHours(1) } != false
+
     /** Recent complete legs of this flight number (not this very flight), newest first. */
     suspend fun fetch(f: Flight): List<List<Pt>> = withContext(Dispatchers.IO) {
         val cs = callsign(f.airline, f.number)
@@ -69,6 +74,7 @@ object PastRoutes {
         // FlightAware (with a key) as the fallback: it keeps every flight's track for about ten days.
         (found.ifEmpty { FlightAware.pastTracks(f, ours) }).sortedByDescending { it.first().t }
     }
+
     /**
      * The same flight number on earlier days, which is usually another plane: AeroDataBox (with a key) names the plane
      * that flew it that day (its modeS hex), and adsb.lol's daily history has that plane's path. One lookup a day,

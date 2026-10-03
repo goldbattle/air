@@ -8,10 +8,19 @@ import java.time.LocalDate
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** The instant stored under [k] as epoch millis, or null when absent. */
 private fun JSONObject.inst(k: String): Instant? = if (has(k)) Instant.ofEpochMilli(getLong(k)) else null
+
+/** Stores [v] as epoch millis, leaving the key out when null (keeps the file small). */
 private fun JSONObject.putInst(k: String, v: Instant?) = apply { if (v != null) put(k, v.toEpochMilli()) }
+
+/** Stores [v], leaving the key out when empty. */
 private fun JSONObject.putStr(k: String, v: String) = apply { if (v.isNotEmpty()) put(k, v) }
 
+/**
+ * This flight as stored in flights.json and backups. Empty and null fields are left out. Field names must never change,
+ * or older files and backups stop loading.
+ */
 fun Flight.toJson(): JSONObject = JSONObject()
     .put("id", id).put("airline", airline).put("number", number).put("date", date.toString())
     .put("from", from).put("to", to)
@@ -43,6 +52,10 @@ fun Flight.toJson(): JSONObject = JSONObject()
     }
     .putTrack(this)
 
+/**
+ * Reads a flight written by [toJson], by this or any older version (missing fields get their defaults). Throws on a
+ * record without the basics: id, number, date, airports.
+ */
 fun flightFrom(j: JSONObject) = Flight(
     id = j.getString("id"), airline = j.getString("airline"), number = j.getString("number"),
     date = LocalDate.parse(j.getString("date")), from = j.getString("from"), to = j.getString("to"),
@@ -73,23 +86,29 @@ fun flightFrom(j: JSONObject) = Flight(
     },
 ).withTrack(j)
 
+/** Reads takeoff or landing weather written by [toJson]. */
 private fun wxFrom(j: JSONObject) = Wx(
     j.getDouble("t"), j.getInt("code"), j.optDouble("wind", 0.0), Instant.ofEpochMilli(j.getLong("at")), Instant.ofEpochMilli(j.getLong("fetched")),
 )
+
+/** Rounded to 4 decimals (about 10 m): plenty for a map, and much smaller on disk. */
 private fun r4(x: Double) = Math.round(x * 1e4) / 1e4
 
 /** Flat [lat, lon, alt, t, lat, lon, ...], about 25 bytes a point. */
 fun List<Pt>.toJson() = JSONArray().also { a -> forEach { a.put(r4(it.lat)).put(r4(it.lon)).put(it.altFt).put(it.t) } }
 
+/** Reads a flat track array written by [List.toJson]; empty for null. */
 fun ptsFrom(a: JSONArray?): List<Pt> = if (a == null) emptyList() else
     (0 until a.length() / 4).map { i -> Pt(a.getDouble(4 * i), a.getDouble(4 * i + 1), a.getInt(4 * i + 2), a.getLong(4 * i + 3)) }
 
+/** Adds [f]'s flown path, its plane's hex, and when the path was completed, when there are any. */
 fun JSONObject.putTrack(f: Flight): JSONObject = apply {
     if (f.track.isNotEmpty()) put("track", f.track.toJson())
     if (f.hex.isNotEmpty()) put("hex", f.hex)
     f.trackAt?.let { put("trackAt", it.toEpochMilli()) }
 }
 
+/** This flight with the path fields read back from [j]. */
 fun Flight.withTrack(j: JSONObject) = copy(
     track = ptsFrom(j.optJSONArray("track")), hex = j.optString("hex"),
     trackAt = if (j.has("trackAt")) Instant.ofEpochMilli(j.getLong("trackAt")) else null,

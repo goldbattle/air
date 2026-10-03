@@ -39,8 +39,13 @@ import kotlinx.coroutines.launch
 // Frequent on the left, rare on the right, so the common ones never need a sideways scroll.
 private val TABS get() = listOf("About", "Data", "Import", "Notifications", "Duplicates") + if (Debug.on) listOf("Debug") else emptyList()
 
+/** The selected settings tab, kept outside the screen so it survives opening a page and coming back. */
 object SettingsNav { var tab by mutableIntStateOf(0) }
 
+/**
+ * Settings as tabs of pills: About, Data, Import, Notifications, Duplicates (with a count), and Debug once developer
+ * options are on.
+ */
 @Composable
 fun SettingsScreen() = Page("Settings") {
     item("tabs") {
@@ -61,6 +66,9 @@ fun SettingsScreen() = Page("Settings") {
 
 // ---------- About ----------
 
+/**
+ * Your name, stats, build and update rows (seven taps on Version turn on developer options), and what leaves the phone.
+ */
 @Composable
 private fun AboutTab() {
     val built = Instant.ofEpochMilli(BuildConfig.BUILD_TIME).atZone(ZoneId.systemDefault())
@@ -115,6 +123,7 @@ private fun AboutTab() {
 
 // ---------- Notifications ----------
 
+/** Live progress, alerts and reminders, for my flights and friends'. Changes reschedule the background check. */
 @Composable
 private fun NotificationsTab() {
     val ctx = LocalContext.current
@@ -161,6 +170,10 @@ private fun NotificationsTab() {
 
 // ---------- Data sources ----------
 
+/**
+ * Where data comes from: the free sources, the AeroDataBox and FlightAware keys with a test button, this month's
+ * lookups, and Celsius.
+ */
 @Composable
 private fun DataTab() {
     val ctx = LocalContext.current
@@ -227,6 +240,7 @@ private fun DataTab() {
 
 // ---------- Duplicates ----------
 
+/** Groups of flights that look like the same trip, to merge or mark as not duplicates. */
 @Composable
 private fun DuplicatesTab() {
     val groups = Dupes.groups()
@@ -269,6 +283,7 @@ private fun DuplicatesTab() {
 
 // ---------- Backup ----------
 
+/** Import from Gmail, a file or the print service, and export a backup. */
 @Composable
 private fun ImportTab() {
     val ctx = LocalContext.current
@@ -311,6 +326,7 @@ private fun ImportTab() {
 
 // ---------- Debug (developer options) ----------
 
+/** Developer options: the debug report to copy or share, phone details, the request log, and switching them off. */
 @Composable
 private fun DebugTab() {
     val ctx = LocalContext.current

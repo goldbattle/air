@@ -28,8 +28,10 @@ object NasaGibs {
     private const val WMS = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap" +
         "&VERSION=1.3.0&LAYERS=IMERG_Precipitation_Rate_30min&CRS=EPSG:4326&FORMAT=image/png&TRANSPARENT=TRUE"
     val WORLD = GeoBox(-180.0, 180.0, -90.0, 90.0)
+
     /** Flights within the same 3 hours share a picture: storms don't move far in that time at this scale. */
     val SLOT: Duration = Duration.ofHours(3)
+
     /** IMERG's delay (its "early run" is about 6 h behind); a slot newer than this isn't published yet. */
     val LAG: Duration = Duration.ofHours(7)
     private val tried = ConcurrentHashMap<String, Instant>()
@@ -37,6 +39,7 @@ object NasaGibs {
     private var dir: File? = null
     private val mem = ConcurrentHashMap<String, RadarImage>()
 
+    /** Points the picture cache at app storage (files/wxmaps); call once at startup. */
     fun init(ctx: android.content.Context) { dir = File(ctx.filesDir, "wxmaps").apply { mkdirs() } }
 
     /** The slot [at] falls in, as "yyyyMMddHH" (UTC, hour a multiple of 3). */
@@ -58,10 +61,12 @@ object NasaGibs {
     fun relevant(f: Flight, now: Instant) = !f.cancelled && f.origin != null && f.dest != null &&
         (f.arrActual != null || now > f.arrGuess) && time(keyFor(f)) < now.minus(LAG)
 
+    /** The WMS request for IMERG's rain rate over [box] at [at], as a [w] by [h] PNG. */
     fun url(box: GeoBox, at: Instant, w: Int, h: Int) =
         "$WMS&BBOX=${box.latMin},${box.lonMin},${box.latMax},${box.lonMax}&WIDTH=$w&HEIGHT=$h" +
             "&TIME=${DateTimeFormatter.ISO_INSTANT.format(at)}"
 
+    /** Where a slot's picture lives on the phone, or null before [init]. */
     private fun file(key: String) = dir?.let { File(it, "$key.png") }
 
     /** The slot's picture from memory or disk, without the network. */

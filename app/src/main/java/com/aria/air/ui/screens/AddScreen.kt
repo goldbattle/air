@@ -40,9 +40,12 @@ object Imports {
     var work by mutableStateOf(false)             // booked through a company, or sent to an address you marked work
     var to by mutableStateOf<String?>(null)       // the address the email was sent to, if it says
     var error by mutableStateOf<String?>(null)
-    /** Called when the review ends, with whether flights were added (instead of opening them); see [Mail.review]. */
+
+    /** Called when the review ends, with whether flights were added (instead of opening them); see [reviewMail]. */
     var then: ((Boolean) -> Unit)? = null
     val active get() = busy || found != null || error != null
+
+    /** Forgets the document under review. */
     fun clear() { busy = false; found = null; traveler = null; work = false; to = null; error = null; then = null }
 }
 
@@ -87,6 +90,10 @@ fun importInto(ctx: Context, uri: Uri?, text: String?, friend: Boolean) {
     }
 }
 
+/**
+ * The Add page: the import review while a document is being read or reviewed, else the search form. Also hosts the
+ * paste-text dialog.
+ */
 @Composable
 fun AddScreen(s: Screen.Add) {
     val ctx = LocalContext.current

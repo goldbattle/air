@@ -17,7 +17,7 @@ import org.junit.Before
 import org.junit.Test
 import java.time.Instant
 
-/** Recorded tracks, adsb.lol trace parsing and what the flight map draws (Routes.kt). Fake data only. */
+/** Recorded tracks, adsb.lol trace parsing and what the flight map draws (Track.kt, AdsbLol, PastRoutes, FlownTrack). Fake data only. */
 class RoutesTest : AirTest() {
     private val requested = mutableListOf<String>()
     private val responses = linkedMapOf<String, String>()

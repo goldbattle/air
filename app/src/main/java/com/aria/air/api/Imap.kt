@@ -29,6 +29,7 @@ private val LATIN1 = Charsets.ISO_8859_1
  * until [Mime] decodes them.
  */
 class Imap(private val sock: Socket) : Closeable {
+    /** A NO or BAD answer from the server, with its text (never the command, which may hold the password). */
     class Error(msg: String) : IOException(msg)
 
     /** One response: its text, with each `{n}` literal's bytes in [literals], in order. */
@@ -48,6 +49,7 @@ class Imap(private val sock: Socket) : Closeable {
         if (!hello.startsWith("* OK") && !hello.startsWith("* PREAUTH")) throw Error(hello)
     }
 
+    /** One line from the server, without its CRLF, bytes kept as Latin-1. */
     private fun readLine(): String {
         val b = ByteArrayOutputStream()
         while (true) {
@@ -59,6 +61,7 @@ class Imap(private val sock: Socket) : Closeable {
         return String(b.toByteArray(), LATIN1).removeSuffix("\r")
     }
 
+    /** One whole response: its line plus every {n} literal it announces, read byte-exact. */
     private fun read(): Resp {
         val line = StringBuilder()
         val lits = mutableListOf<String>()
@@ -86,8 +89,10 @@ class Imap(private val sock: Socket) : Closeable {
         }
     }
 
+    /** Signs in with the address and app password; throws [Error] when the server says no. */
     fun login(user: String, pass: String) { cmd("LOGIN ${quote(user)} ${quote(pass)}") }
 
+    /** The server's capabilities, upper-cased. X-GM-EXT-1 means Gmail, whose own search syntax we can use. */
     fun caps(): Set<String> = cmd("CAPABILITY").filter { it.line.startsWith("* CAPABILITY", true) }
         .flatMap { it.line.split(' ').drop(2) }.map { it.uppercase() }.toSet()
 
@@ -96,6 +101,7 @@ class Imap(private val sock: Socket) : Closeable {
         (l.getOrNull(2) as? List<*>)?.any { "\\All".equals(it as? String, true) } == true
     }?.getOrNull(4) as? String ?: "INBOX"
 
+    /** Opens [box] read-only (EXAMINE, so nothing is marked read) and returns its UIDVALIDITY, next UID and size. */
     fun examine(box: String): Box {
         val rs = cmd("EXAMINE ${quote(box)}")
         fun num(k: String) = rs.firstNotNullOfOrNull { Regex("\\[$k (\\d+)\\]",RegexOption.IGNORE_CASE).find(it.line) }?.groupValues?.get(1)?.toLong() ?: 0
@@ -103,6 +109,7 @@ class Imap(private val sock: Socket) : Closeable {
         return Box(num("UIDVALIDITY"), num("UIDNEXT"), exists)
     }
 
+    /** UIDs of the emails matching [criteria]; the server does the searching, so only matches are downloaded. */
     fun search(criteria: String): List<Long> = cmd("UID SEARCH $criteria").filter { it.line.startsWith("* SEARCH", true) }
         .flatMap { it.line.split(' ').drop(2).mapNotNull(String::toLongOrNull) }
 
@@ -119,6 +126,7 @@ class Imap(private val sock: Socket) : Closeable {
         runCatching { sock.close() }
     }
 
+    /** Connecting, quoting, and parsing IMAP's nested lists. */
     companion object {
         // Android's regex engine (ICU), unlike the JVM's, rejects an unescaped '}' or ']'.
         private val literalAtEnd = Regex("\\{(\\d+)\\}$")
@@ -137,6 +145,7 @@ class Imap(private val sock: Socket) : Closeable {
             return Imap(s)
         }
 
+        /** [s] as an IMAP quoted string, with backslashes and quotes escaped. */
         fun quote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
         /** Parses an IMAP response into atoms (String), NIL (null) and nested lists; `{n}` takes the next literal. */
@@ -188,9 +197,11 @@ object Mime {
     /** A leaf of a message's BODYSTRUCTURE; [section] is what BODY[...] fetches. */
     data class Part(val section: String, val type: String, val charset: String?, val encoding: String?, val name: String, val size: Long)
 
+    /** The charset a header names, or UTF-8 when it's missing or unknown. */
     fun charset(name: String?): Charset =
         runCatching { Charset.forName(name!!.trim().trim('"').substringBefore('*')) }.getOrDefault(Charsets.UTF_8)
 
+    /** Decodes quoted-printable: =XX bytes, and soft line breaks dropped. */
     fun qp(s: String): ByteArray {
         val o = ByteArrayOutputStream()
         fun hex(c: Char) = c in '0'..'9' || c in 'A'..'F' || c in 'a'..'f'
@@ -210,12 +221,14 @@ object Mime {
         return o.toByteArray()
     }
 
+    /** A part's bytes undone from its transfer encoding (base64, quoted-printable, or as is). */
     fun bytes(raw: String, encoding: String?): ByteArray = when (encoding?.lowercase()) {
         "base64" -> runCatching { Base64.getMimeDecoder().decode(raw) }.getOrDefault(ByteArray(0))
         "quoted-printable" -> qp(raw)
         else -> raw.toByteArray(LATIN1)
     }
 
+    /** A text part as a string: transfer encoding undone, then decoded with its charset. */
     fun text(raw: String, encoding: String?, charset: String?) = String(bytes(raw, encoding), charset(charset))
 
     private val word = Regex("=\\?([^?]+)\\?([BbQq])\\?([^?]*)\\?=")
@@ -249,6 +262,10 @@ object Mime {
     /** IMAP INTERNALDATE ("03-Sep-2019 14:02:11 -0700") -> the day it arrived. */
     fun internalDate(s: String?): LocalDate? = s?.let { runCatching { ZonedDateTime.parse(it.trim(), internal).toLocalDate() }.getOrNull() }
 
+    /**
+     * The leaves of a BODYSTRUCTURE as [Part]s with their BODY[] section numbers. A forwarded email (message/rfc822) is
+     * opened up, since the booking is inside it.
+     */
     fun parts(bs: List<*>, prefix: String = ""): List<Part> {
         if (bs.firstOrNull() is List<*>) return bs.takeWhile { it is List<*> }.flatMapIndexed { i, p ->
             parts(p as List<*>, if (prefix.isEmpty()) "${i + 1}" else "$prefix.${i + 1}")

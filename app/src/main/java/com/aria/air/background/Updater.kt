@@ -44,7 +44,11 @@ object Updater {
 
     /** What Settings shows: null until checked, then "Up to date", "Version X available", progress or an error. */
     var status by mutableStateOf<String?>(null)
+
+    /** The newer release found by the last check, or null. */
     var available by mutableStateOf<GitHub.Release?>(null)
+
+    /** A check or download is running; the Settings row ignores taps meanwhile. */
     var busy by mutableStateOf(false)
 
     /** Checks now and updates [status]. */
@@ -94,6 +98,10 @@ object Updater {
         )
     }
 
+    /**
+     * Posts or updates the one update notification: title, optional text, a progress bar ([progress] below 0 =
+     * indeterminate) and an optional button.
+     */
     fun notify(ctx: Context, title: String, text: String? = null, progress: Int? = null, action: Pair<String, PendingIntent>? = null) {
         val b = Notification.Builder(ctx, CHANNEL)
             .setSmallIcon(if (progress != null) android.R.drawable.stat_sys_download else R.drawable.ic_plane)
@@ -106,8 +114,12 @@ object Updater {
         ctx.getSystemService(NotificationManager::class.java).notify(NOTE, b.build())
     }
 
+    /** Removes the update notification. */
     fun cancel(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).cancel(NOTE)
 
+    /**
+     * A PendingIntent that sends [action] to [UpdateReceiver]: the notification's buttons and the installer's callback.
+     */
     fun broadcast(ctx: Context, action: String, flags: Int = PendingIntent.FLAG_IMMUTABLE) =
         PendingIntent.getBroadcast(ctx, 0, Intent(ctx, UpdateReceiver::class.java).setAction(action), flags or PendingIntent.FLAG_UPDATE_CURRENT)
 

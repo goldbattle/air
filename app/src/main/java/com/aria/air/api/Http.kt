@@ -3,9 +3,7 @@ package com.aria.air.api
 // The one way out to the network: plain GETs with logging, and a test hook.
 
 import com.aria.air.*
-import com.aria.air.data.*
 import com.aria.air.debug.*
-import androidx.compose.foundation.layout.size
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -23,6 +21,10 @@ object Http {
     /** Every request goes through here; unit tests swap in canned responses. */
     internal var transport: (url: String, headers: Map<String, String>) -> String = ::fetch
 
+    /**
+     * GETs [url] and returns the body as text, logging the request (URL and outcome, never the headers, which hold API
+     * keys). Throws [HttpError] on a non-2xx answer and an IOException when offline.
+     */
     internal fun get(url: String, headers: Map<String, String> = emptyMap()): String {
         val start = System.currentTimeMillis()
         val r = runCatching { transport(url, headers) }
@@ -30,6 +32,7 @@ object Http {
         return r.getOrThrow()
     }
 
+    /** The real network call behind [transport]: 10 s to connect, 15 s to read, with Air's User-Agent. */
     private fun fetch(url: String, headers: Map<String, String>): String {
         val c = URL(url).openConnection() as HttpURLConnection
         try {

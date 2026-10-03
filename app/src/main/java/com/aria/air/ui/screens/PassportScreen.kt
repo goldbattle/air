@@ -118,6 +118,9 @@ fun PassportScreen() {
     }
 }
 
+/**
+ * The passport card: name, year, a map of the routes and the big totals, with a passport-style code line at the bottom.
+ */
 @Composable
 private fun PassportCard(list: List<Flight>, s: Stats, year: Int?) {
     val routes = remember(list) {
@@ -169,6 +172,7 @@ private fun PassportCard(list: List<Flight>, s: Stats, year: Int?) {
     if (list.isNotEmpty()) Footnote("Since ${list.minOf { it.date }.let { if (it.year == LocalDate.now().year) dayLabel(it) else it.year.toString() }}")
 }
 
+/** A big number with a small label, for the passport card. */
 @Composable
 private fun BigStat(value: String, label: String, modifier: Modifier) = Column(modifier) {
     Text(value, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)

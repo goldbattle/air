@@ -60,9 +60,11 @@ import java.time.LocalDate
 import java.time.LocalTime
 import kotlinx.coroutines.delay
 
+/** Shows Android's date picker at [initial]; [onPicked] gets the day chosen. */
 fun pickDate(ctx: Context, initial: LocalDate, onPicked: (LocalDate) -> Unit) =
     DatePickerDialog(ctx, { _, y, m, d -> onPicked(LocalDate.of(y, m + 1, d)) }, initial.year, initial.monthValue - 1, initial.dayOfMonth).show()
 
+/** Shows Android's 12-hour time picker at [initial]; [onPicked] gets the time chosen. */
 fun pickTime(ctx: Context, initial: LocalTime, onPicked: (LocalTime) -> Unit) =
     TimePickerDialog(ctx, { _, h, m -> onPicked(LocalTime.of(h, m)) }, initial.hour, initial.minute, false).show()
 
@@ -86,6 +88,10 @@ fun <T> Stack(state: T, depth: (T) -> Int, content: @Composable (T) -> Unit) = A
 
 // ---------- Building blocks ----------
 
+/**
+ * A screen in the iOS style: a top bar with Back and actions, a big title that scrolls away with the content, and
+ * pull-to-refresh when [onRefresh] is set. [content] fills a LazyColumn.
+ */
 @Composable
 fun Page(
     title: String,
@@ -119,6 +125,7 @@ fun Page(
     }
 }
 
+/** "‹ Back" in the top bar. */
 @Composable
 fun BackButton(label: String, onBack: () -> Unit, tint: Color = C.blue) = Row(
     Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onBack).padding(end = 10.dp, top = 8.dp, bottom = 8.dp),
@@ -135,23 +142,31 @@ fun CircleButton(icon: ImageVector, description: String, onClick: () -> Unit) = 
     contentAlignment = Alignment.Center,
 ) { Icon(icon, description, tint = C.blue, modifier = Modifier.size(22.dp)) }
 
+/** A rounded card holding rows, like a section of an iOS grouped list. */
 @Composable
 fun Group(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) =
     Column(modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.card), content = content)
 
+/** Small gray capitals above a [Group]. */
 @Composable
 fun SectionHeader(text: String) = Text(
     text.uppercase(), fontSize = 13.sp, color = C.secondary, letterSpacing = 0.3.sp,
     modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 7.dp),
 )
 
+/** Small gray text under a [Group], for explanations. */
 @Composable
 fun Footnote(text: String, color: Color = C.secondary) =
     Text(text, fontSize = 13.sp, color = color, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 7.dp))
 
+/** The thin line between rows, inset from the left like iOS. */
 @Composable
 fun Hairline(inset: Dp = 16.dp) = Box(Modifier.padding(start = inset).fillMaxWidth().height(0.5.dp).background(C.separator))
 
+/**
+ * A row: optional icon, title and subtitle, a value on the right, and a chevron when it opens something. Tappable when
+ * [onClick] is set.
+ */
 @Composable
 fun Cell(
     title: String,
@@ -183,6 +198,7 @@ fun Cell(
     if (chevron) Icon(Icons.Filled.ChevronRight, null, tint = C.tertiary)
 }
 
+/** A row with an on/off switch, green when on. */
 @Composable
 fun SwitchCell(title: String, checked: Boolean, subtitle: String? = null, onChange: (Boolean) -> Unit) = Row(
     Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -255,6 +271,7 @@ fun FieldCell(
     }
 }
 
+/** A borderless multi-line text field with a placeholder. */
 @Composable
 fun TextArea(value: String, placeholder: String, minHeight: Dp = 88.dp, onChange: (String) -> Unit) = BasicTextField(
     value, onChange,
@@ -268,6 +285,7 @@ fun TextArea(value: String, placeholder: String, minHeight: Dp = 88.dp, onChange
     },
 )
 
+/** A rounded button: filled with [color], or [color] text on a card when not [filled]; dimmed when disabled. */
 @Composable
 fun Button(
     text: String,
@@ -292,12 +310,14 @@ fun Button(
     Text(text, color = fg, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
 }
 
+/** A small tinted pill, for statuses and labels. */
 @Composable
 fun Badge(text: String, color: Color) = Text(
     text, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
     modifier = Modifier.clip(CircleShape).background(color.copy(alpha = 0.14f)).padding(horizontal = 8.dp, vertical = 3.dp),
 )
 
+/** An iOS segmented control: equal-width options, the selected one raised. */
 @Composable
 fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) = Row(
     Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(C.fill).padding(2.dp),
@@ -333,6 +353,7 @@ fun Pills(options: List<String>, selected: Int, onSelect: (Int) -> Unit) = Row(
 /** One-field edit dialog. Show it by setting the state to non-null. */
 class EditRequest(val title: String, val value: String, val caps: Boolean = false, val onSave: (String) -> Unit)
 
+/** The dialog for an [EditRequest]; nothing when [req] is null. */
 @Composable
 fun EditDialog(req: EditRequest?, onDismiss: () -> Unit) {
     if (req == null) return

@@ -29,6 +29,7 @@ object FlightSync {
         return lastInboundTry[f.id]?.let { Duration.between(it, now) >= every } != false
     }
 
+    /** Whether either status key is set. */
     private fun key0(a: String, b: String) = a.isNotBlank() || b.isNotBlank()
 
     private val lastAeroTry = java.util.concurrent.ConcurrentHashMap<String, Instant>()
@@ -68,8 +69,11 @@ object FlightSync {
     }
 
     /**
-     * Refreshes everything we can about a flight. [auto] = background poll, which spends status API calls sparingly:
-     * every 15 min around the flight, every 6 h before it.
+     * Refreshes everything we can about a flight and returns the new copy (the caller saves it). In order: the status
+     * service (AeroDataBox, with FlightAware as a second opinion), the live position from adsb.lol (which also infers
+     * takeoff and landing when there's no key), the inbound plane, the flown path, then weather. [auto] = a background
+     * poll, which asks each source only when [Cadence] says it's due; the refresh button asks the status service anyway.
+     * [foreground] = the flight's page is open, so the position is worth asking for every minute.
      */
     suspend fun refresh(f: Flight, auto: Boolean = false, foreground: Boolean = false): Flight {
         // A takeoff time that can't be ours (saved from another leg or day on the same number) is dropped first.

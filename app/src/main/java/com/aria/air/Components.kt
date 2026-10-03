@@ -52,6 +52,7 @@ class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
 class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) = Updater.onBroadcast(ctx, intent)
 }
+
 /** Home screen widget: the next (or current) flight, in the style of the iOS system widgets. */
 class FlightWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, LARGE))
@@ -62,15 +63,21 @@ class FlightWidget : GlanceAppWidget() {
         provideContent { WidgetContent(context) }
     }
 
+    /** The widget's size breakpoints, and a way to redraw every placed copy. */
     companion object {
         val SMALL = DpSize(150.dp, 150.dp)
         val WIDE = DpSize(300.dp, 150.dp)
         val LARGE = DpSize(300.dp, 250.dp) // wide and tall: adds the weather
 
+        /**
+         * Redraws every placed copy of the widget: after each save, and on each background check since countdowns move.
+         * Failures are ignored; having no widget placed is normal.
+         */
         suspend fun refresh(ctx: Context) = runCatching { FlightWidget().updateAll(ctx) }
     }
 }
 
+/** The receiver the launcher knows the widget by (named in the manifest). It only hands out [FlightWidget]. */
 class FlightWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget = FlightWidget()
 }

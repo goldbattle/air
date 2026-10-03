@@ -16,13 +16,13 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+// ponytail: WorkManager is deferred in deep Doze, so updates can lag while the phone sits idle. The notification's
+// countdown ticks on its own regardless. Upgrade path: a foreground service while airborne.
 /**
  * Updates flights that are close to happening, then reschedules itself at a pace set by [nextCheckMinutes].
  * Works offline: the notification and widget are redrawn from the schedule (or the best estimate) every run, and the
  * network is only used when there is a connection. Stops when nothing is upcoming. Runs inside [TrackWorker].
  */
-// ponytail: WorkManager is deferred in deep Doze, so updates can lag while the phone sits idle. The notification's
-// countdown ticks on its own regardless. Upgrade path: a foreground service while airborne.
 object Tracker {
     /** One run of the check: refresh what's due, notify what changed, redraw the widget, schedule the next run. */
     suspend fun run(ctx: Context) {
@@ -49,7 +49,7 @@ object Tracker {
         FlightWidget.refresh(ctx) // countdowns move even when nothing was saved
     }
 
-    /** All my upcoming flights (far-out ones only hit the network once a day, see Api.refresh); friends' near theirs. */
+    /** All my upcoming flights (far-out ones only hit the network once a day, see Cadence.statusEvery); friends' near theirs. */
     fun tracked(f: Flight, now: Instant) = (f.upcoming || f.maybeLive) && (f.mine || f.depGuess < now.plus(Duration.ofHours(6)))
 
     /** Call after flights change, and from the worker itself. */
@@ -91,6 +91,7 @@ object Tracker {
         }
     } ?: 30L
 
+    /** Whether the phone has internet right now. Offline runs skip the network and just redraw. */
     fun isOnline(ctx: Context): Boolean {
         val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
         return cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true

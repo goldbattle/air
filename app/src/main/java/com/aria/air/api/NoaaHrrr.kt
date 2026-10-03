@@ -22,15 +22,18 @@ import org.json.JSONObject
  */
 object NoaaHrrr {
     private const val BASE = "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/"
+
     /** The images' extent: 3050 x 1340 pixels of 0.02° from 126°W, 50°N. */
     val BOX = GeoBox(-126.0, -65.0, 23.2, 50.0)
     val MAX_AHEAD: Duration = Duration.ofHours(48)
+
     /** A new run comes out every hour. */
     val EVERY: Duration = Duration.ofMinutes(60)
 
     private val cache = ConcurrentHashMap<String, RadarImage>()
     private val tried = ConcurrentHashMap<String, Instant>()
 
+    /** Whether a point lies in the HRRR pictures (the lower 48 and a little around). */
     fun inside(lat: Double, lon: Double) = lon in BOX.lonMin..BOX.lonMax && lat in BOX.latMin..BOX.latMax
 
     /** A flight that hasn't left, with an end in the HRRR area, departing within [MAX_AHEAD]. */
@@ -44,6 +47,10 @@ object NoaaHrrr {
     /** The image's minute offset for [dep] from the run started at [init]: on IEM's 15-minute steps. */
     fun minute(init: Instant, dep: Instant): Int = (Math.round(Duration.between(init, dep).toMinutes() / 15.0) * 15).toInt()
 
+    /**
+     * IEM's file for the forecast [minute]s after the latest run started: "json" for its metadata, "png" for the
+     * picture.
+     */
     fun url(minute: Int, ext: String) = BASE + "refd_%04d.$ext".format(minute)
 
     /** The forecast picture for [f]'s takeoff, from memory or fetched when a newer run may be out. */
@@ -57,6 +64,7 @@ object NoaaHrrr {
             ?.also { cache[f.id] = it } ?: cache[f.id]
     }
 
+    /** Downloads the step nearest [f]'s takeoff from the latest run, or null when that run doesn't reach that far. */
     private suspend fun fetch(f: Flight): RadarImage? = withContext(Dispatchers.IO) {
         val dep = f.dep ?: f.depGuess
         val init = Instant.parse(JSONObject(Http.get(url(0, "json"))).getString("model_init_utc"))

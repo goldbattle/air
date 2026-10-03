@@ -28,6 +28,7 @@ val Flight.arrDelay: Long?
     get() = arrSched?.let { s ->
         (arrActual ?: arrEst?.takeIf { hasLiveStatus || tookOff != null })?.let { Duration.between(s, it).toMinutes() }
     }
+
 /** The phases of a trip, as in the airline apps: before, at the gate, in the air, after landing. */
 enum class Phase(val title: String) { PreTravel("Pre-travel"), Departure("Departure"), InFlight("In flight"), Arrival("Arrival"), Done("Done") }
 
@@ -49,6 +50,11 @@ fun Flight.airlineSaysNotDeparted(now: Instant = Instant.now(clock)): Boolean {
 val Flight.tookOff: Instant?
     get() = depActual?.takeIf { a -> depSched == null || a > depSched.minus(Duration.ofHours(1)) }
 
+/**
+ * Which part of the trip [now] falls in. Hard facts (cancelled, landed, a fresh "not departed" from the airline) win
+ * over tracking, and tracking over the clock, so a stale fix or a missing status can't put the flight in the wrong
+ * phase.
+ */
 fun Flight.phase(now: Instant = Instant.now(clock)): Phase = when {
     cancelled -> if (now < depGuess.plus(Duration.ofHours(6))) Phase.Departure else Phase.Done
     arrActual != null -> if (now < arrActual.plus(Duration.ofHours(1))) Phase.Arrival else Phase.Done
@@ -62,6 +68,7 @@ fun Flight.phase(now: Instant = Instant.now(clock)): Phase = when {
     else -> Phase.Done
 }
 
+/** Not done yet: before, at, in the air, or just after landing. */
 val Flight.upcoming get() = phase() != Phase.Done
 
 /** No schedule yet, but it's from yesterday or today and hasn't landed: worth asking where the plane is. */
@@ -86,6 +93,10 @@ fun Flight.remainingKm(): Double {
     return if (isAirborne) distKm(live!!.lat, live.lon, d.lat, d.lon) else distanceKm * (1 - progress())
 }
 
+/**
+ * How a status reads at a glance: neutral, good, warning, bad, or just informative (in the air). Screens pick the
+ * color.
+ */
 enum class Tone { Neutral, Good, Warn, Bad, Info }
 
 /** Short status like the airline apps: "On time", "Delayed 45m", "In the air", "Landed". */
@@ -108,6 +119,7 @@ fun Flight.status(now: Instant = Instant.now(clock)): Pair<String, Tone> {
         else -> "Upcoming" to Tone.Neutral // no real status yet (too far out, or no status service)
     }
 }
+
 /**
  * Whether a plane broadcasting this flight's callsign really is this flight today. Airlines reuse numbers on other
  * legs and days, so besides being between the airports it has to fit the clock: before the scheduled departure it
@@ -136,6 +148,10 @@ private fun headingToward(l: Live, lat: Double, lon: Double): Boolean {
     return diff < 60
 }
 
+/**
+ * Whether a fix lies roughly between the two airports (the detour through it is under 25% plus 150 km). True when an
+ * airport is unknown, since then we can't tell.
+ */
 fun onRoute(f: Flight, l: Live): Boolean {
     val o = f.origin ?: return true
     val d = f.dest ?: return true

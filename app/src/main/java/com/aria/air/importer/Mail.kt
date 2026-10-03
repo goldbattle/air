@@ -48,6 +48,7 @@ data class MailHit(
     val sent: LocalDate, val text: String, val state: String = "",
 ) {
     val key get() = "$account|$id"
+
     /** Parsed as of the day it arrived, so dates without a year land in the right one. */
     val flights: List<Found> by lazy { Importer.parse(text, sent) }
 }
@@ -73,14 +74,22 @@ fun MailHit.summary(): String {
  */
 object Mail {
     const val GMAIL = "imap.gmail.com"
+
+    /** Linked mailboxes. */
     val accounts = mutableStateListOf<MailAccount>()
+
+    /** Every email found with flights in it, including the imported and dismissed ones (the history). */
     val hits = mutableStateListOf<MailHit>()
+
     /** Keys ticked on the found-emails page; outlives that page while you step through the reviews. */
     val picked = mutableStateListOf<String>()
+
+    /** What a running scan is doing ("Reading x: 12 of 180"), or null when idle. */
     var progress by mutableStateOf<String?>(null)
     private lateinit var file: File
     private val lock = Mutex()
 
+    /** Loads linked accounts and the email history from files/mail.json; call once at startup. */
     fun init(ctx: Context) {
         file = File(ctx.filesDir, "mail.json")
         if (!file.exists()) return
@@ -121,6 +130,7 @@ object Mail {
         tmp.renameTo(file)
     }
 
+    /** Emails worth suggesting: not acted on, with a flight that isn't saved yet. */
     val suggestions get() = suggest(hits) { existingFor(it) != null }
 
     /** Emails not yet acted on whose flights are all saved, newest first. */
@@ -139,6 +149,7 @@ object Mail {
         mark(listOf(key), "i")
     }
 
+    /** Links an account. The app password is encrypted with a key in the Android Keystore before it's saved. */
     fun add(ctx: Context, email: String, host: String, password: String) {
         accounts.removeAll { it.email == email }
         accounts += MailAccount(email, host, Vault.encrypt(password.filterNot { it.isWhitespace() }))
@@ -153,17 +164,22 @@ object Mail {
         save(); MailJobs.schedule(ctx)
     }
 
+    /** Saves a scan's result for [a], unless the account was removed meanwhile. */
     private fun put(a: MailAccount) {
         val i = accounts.indexOfFirst { it.email == a.email }
         if (i >= 0) { accounts[i] = a; save() } // removed mid-scan: drop it
     }
 
+    /**
+     * Files emails as imported ("i", their text dropped) or dismissed ("d"); either way they're never suggested again.
+     */
     fun mark(keys: Collection<String>, state: String) {
         hits.replaceAll { if (it.key in keys) it.copy(state = state, text = if (state == "i") "" else it.text) else it }
         picked.removeAll(keys)
         save()
     }
 
+    /** Brings every dismissed email back into the suggestions. */
     fun restoreDismissed() { hits.replaceAll { if (it.state == "d") it.copy(state = "") else it }; save() }
 
     /** Signs in and opens the mailbox; null when it works, else what went wrong. */
@@ -171,8 +187,10 @@ object Mail {
         runCatching { Imap.connect(host).use { it.login(email, password.filterNot { it.isWhitespace() }); it.examine("INBOX") }; null }.getOrElse(::friendly)
     }
 
+    /** Tests a linked account with its stored password; null when it works. */
     suspend fun test(a: MailAccount): String? = runCatching { Vault.decrypt(a.secret) }.fold({ test(a.email, a.host, it) }, ::friendly)
 
+    /** An error as something the user can act on: wrong password, needs an app password, no connection. */
     private fun friendly(e: Throwable): String {
         val m = e.message.orEmpty()
         return when {
@@ -200,6 +218,10 @@ object Mail {
         n
     }
 
+    /**
+     * Scans one account: signs in, searches the whole mailbox on the server, and reads only emails it hasn't seen.
+     * Returns how many new flights turned up.
+     */
     private suspend fun scan(ctx: Context, account: MailAccount): Int = withContext(Dispatchers.IO) {
         var a = account
         var added = 0
@@ -254,6 +276,7 @@ object Mail {
         return null
     }
 
+    /** The text of a PDF attachment, read through a temporary file. */
     private suspend fun pdfText(ctx: Context, bytes: ByteArray): String {
         val f = File(ctx.cacheDir, "mail.pdf")
         return try {
@@ -267,6 +290,10 @@ object Mail {
 private object Vault {
     private const val ALIAS = "mail"
 
+    /**
+     * The AES key in the Android Keystore, created on first use. It can't leave the Keystore, so the passwords only
+     * decrypt on this phone.
+     */
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
@@ -285,6 +312,7 @@ private object Vault {
         return Base64.getEncoder().encodeToString(c.iv + c.doFinal(s.toByteArray()))
     }
 
+    /** Decrypts what [encrypt] made; throws when the key is gone (the app was reinstalled). */
     fun decrypt(s: String): String {
         val b = Base64.getDecoder().decode(s)
         val c = Cipher.getInstance("AES/GCM/NoPadding")
@@ -311,6 +339,7 @@ object MailQuery {
         "itinerary", "confirmation", "confirmed", "e-ticket", "eticket", "ticket", "receipt", "reservation", "booking", "trip",
         "travel", "\"boarding pass\"", "\"check in\"", "check-in", "flight", "fwd", "fw",
     )
+
     /** Phrases in the body of a booking, for confirmations from senders not listed and forwarded ones. */
     private val phrases = listOf(
         "\"confirmation code\"", "\"confirmation number\"", "\"record locator\"", "\"booking reference\"",

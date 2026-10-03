@@ -44,6 +44,7 @@ class ListMemory {
     val who = mutableIntStateOf(0)
     val scroll = androidx.compose.foundation.lazy.LazyListState()
 
+    /** One memory per list. */
     companion object {
         val flights = ListMemory()
         val friends = ListMemory()
@@ -140,11 +141,13 @@ private fun Layover(a: Flight, b: Flight) = Row(
     Text(layoverText(a, b), fontSize = 13.sp, color = C.secondary)
 }
 
+/** "1h 20m layover in Denver" between two legs. */
 fun layoverText(a: Flight, b: Flight): String {
     val gap = Duration.between(a.arr ?: a.arrGuess, b.dep ?: b.depGuess)
     return "${span(gap)} layover in ${a.dest?.city ?: a.to}"
 }
 
+/** What an empty list says, with an Add button under Upcoming. */
 @Composable
 private fun EmptyState(friends: Boolean, past: Boolean) = Column(
     Modifier.fillMaxWidth().padding(top = 64.dp, start = 24.dp, end = 24.dp),
@@ -174,6 +177,10 @@ private fun EmptyState(friends: Boolean, past: Boolean) = Column(
     }
 }
 
+/**
+ * A flight in a list: airline and number, status, both ends with times, the inbound plane before departure, and
+ * progress while flying.
+ */
 @Composable
 fun FlightCard(f: Flight, now: Instant, showFriend: Boolean = false, onClick: () -> Unit) {
     val (status, tone) = f.status(now)
@@ -233,6 +240,7 @@ fun FlightCard(f: Flight, now: Instant, showFriend: Boolean = false, onClick: ()
     }
 }
 
+/** The small text between the airports on a card: "in 3h 5m" before departure, the flight time otherwise. */
 internal fun middleLabel(f: Flight, phase: Phase, now: Instant): String = when (phase) {
     Phase.PreTravel, Phase.Departure -> {
         val d = Duration.between(now, f.dep ?: f.depGuess)
@@ -241,6 +249,7 @@ internal fun middleLabel(f: Flight, phase: Phase, now: Instant): String = when (
     else -> span(f.duration)
 }
 
+/** One end of a card: code, city and time colored by delay, with the old time struck through when it moved. */
 @Composable
 private fun Endpoint(
     code: String, city: String?, best: Instant?, sched: Instant?, zone: java.time.ZoneId, delay: Long?,

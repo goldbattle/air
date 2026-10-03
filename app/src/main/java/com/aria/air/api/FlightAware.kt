@@ -54,6 +54,7 @@ object FlightAware {
         )
     }
 
+    /** Within 12 h of departure: only then is the inbound plane worth an extra paid lookup. */
     private fun soon(f: Flight) = Duration.between(Instant.now(clock), f.dep ?: f.depGuess) < Duration.ofHours(12)
 
     /**

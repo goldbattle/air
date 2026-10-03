@@ -14,6 +14,10 @@ import androidx.compose.runtime.*
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 
+/**
+ * The process start: loads the bundled data and saved state into the singletons every screen and worker reads (Prefs,
+ * Db, Store, caches), then starts the background flight check, the update check and a weather backfill.
+ */
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
@@ -34,6 +38,7 @@ class App : Application() {
         scope.launch { WeatherSync.backfill() }
     }
 
+    /** App-wide state that outlives any screen. */
     companion object {
         /** Outlives screens, so lookups and imports finish when you navigate away. */
         val scope = MainScope()

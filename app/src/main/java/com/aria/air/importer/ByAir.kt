@@ -27,6 +27,7 @@ fun csvLine(line: String): List<String> {
     return out
 }
 
+/** Whether [text] is a byAir CSV export, by its header row. */
 fun isByAirCsv(text: String) = text.trimStart('﻿').startsWith("Flight Date,Flight Code")
 
 /**

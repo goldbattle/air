@@ -1,6 +1,7 @@
 package com.aria.air.data
 
-// Flown paths: the breadcrumb track recorded while live, and what the flight map draws.
+// Flown paths: the breadcrumb track recorded while live (kept on the Flight, so it's in backups), and what the flight
+// map draws.
 
 import com.aria.air.sync.*
 import com.aria.air.util.*
@@ -8,8 +9,10 @@ import java.time.Instant
 
 const val TRACK_GAP = 120L // seconds between kept points
 const val TRACK_MAX = 300
+
 /** Past routes kept and drawn per flight number and route. */
 const val MAX_PAST = 20
+
 /** Days looked back the first time past routes are fetched; after that one more day each day. */
 const val FIRST_DAYS = 7L
 
@@ -20,6 +23,7 @@ fun List<Pt>.add(p: Pt): List<Pt> {
     return if (out.size > TRACK_MAX) out.filterIndexed { i, _ -> i % 2 == 0 || i == out.lastIndex } else out
 }
 
+/** [pts] thinned the way recording thins: one point per [TRACK_GAP] seconds, at most [TRACK_MAX]. */
 fun thin(pts: List<Pt>): List<Pt> = pts.fold(emptyList()) { acc, p -> acc.add(p) }
 
 /** Adds an airborne fix to the recorded track. */
@@ -35,6 +39,7 @@ fun mergeTracks(a: List<Pt>, b: List<Pt>): List<Pt> = if (a == b || a.isEmpty())
 /** Faint past paths, the planned arc (or not), the flown path solid, and the rest of the way from the plane, dashed. */
 data class MapPaths(val typical: List<List<Pt>>, val arc: Boolean, val flown: List<Pt>, val rest: List<Pt>)
 
+/** Past routes are kept per flight number and route: "UA100 SFO-BOS". */
 val Flight.routeKey get() = "$code $from-$to"
 
 /** The path actually flown: from the origin through the track, to the plane or (landed) the destination. */
@@ -68,5 +73,6 @@ fun Flight.mapPaths(): MapPaths = paths(
     PastRoutes.cache[routeKey]?.legs.orEmpty(), Store.flights,
     if (Layers.routes) MAX_PAST else 0,
 )
+
 /** Recent paths flown under a flight number, as fetched [at]; days back to [oldest] have been looked at. */
 data class Typical(val at: Instant, val legs: List<List<Pt>>, val oldest: java.time.LocalDate? = null)

@@ -7,9 +7,6 @@ import com.aria.air.debug.*
 import com.aria.air.util.*
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.filled.Layers
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -36,17 +33,24 @@ object RainViewer {
     const val TILE = 512 // RainViewer's large tiles: twice the detail at the same zoom
     private const val MAX_ZOOM = 7
     private const val MAX_TILES = 9
+
     /** RainViewer publishes a frame every 10 minutes. */
     val EVERY: Duration = Duration.ofMinutes(10)
+
     /** Radar shows now; hours before departure it says nothing about the flight. */
     val LEAD: Duration = Duration.ofHours(6)
     private const val MAPS = "https://api.rainviewer.com/public/weather-maps.json"
 
+    /** Web Mercator tile column of [lon] at zoom [z]; the fraction says where inside the tile. */
     fun tileX(lon: Double, z: Int) = (lon + 180) / 360 * (1 shl z)
+
+    /** Web Mercator tile row of [lat] at zoom [z], with the fraction; clamped to ±85°, where the projection ends. */
     fun tileY(lat: Double, z: Int): Double {
         val r = Math.toRadians(lat.coerceIn(-85.0, 85.0))
         return (1 - ln(tan(r) + 1 / cos(r)) / PI) / 2 * (1 shl z)
     }
+
+    /** The latitude at a (fractional) tile row: the inverse of [tileY]. */
     fun tileLat(y: Double, z: Int) = Math.toDegrees(atan(sinh(PI * (1 - 2 * y / (1 shl z)))))
 
     /**
@@ -135,6 +139,7 @@ object RainViewer {
     /** Relevant and the radar layer is on. The layer only hides the picture; fetching and the cache ignore it. */
     fun shown(f: Flight, now: Instant) = Layers.radar && relevant(f, now)
 
+    /** Whether to ask again: never asked yet, or [EVERY] has passed since the last try. */
     fun due(lastTry: Instant?, now: Instant) = lastTry == null || Duration.between(lastTry, now) >= EVERY
 
     private val cache = ConcurrentHashMap<String, RadarImage>()
@@ -175,6 +180,7 @@ object RainViewer {
     val KEEP: Duration = Duration.ofMinutes(90)
     private var dir: java.io.File? = null
 
+    /** Points the offline copy at the cache folder (cache/radar); call once at startup. */
     fun init(ctx: android.content.Context) { dir = java.io.File(ctx.cacheDir, "radar").apply { mkdirs() } }
 
     /** What's in memory or on disk for [f], without asking the network. An old picture is worse than none. */
@@ -184,6 +190,10 @@ object RainViewer {
         return r?.takeIf { shown(f, now) && Duration.between(it.fetched, now) < KEEP }
     }
 
+    /**
+     * Keeps the picture with its box and times on disk, so it's still there after a restart offline. Errors are
+     * ignored.
+     */
     private fun save(id: String, r: RadarImage) = runCatching {
         val d = dir ?: return@runCatching
         java.io.File(d, "$id.png").outputStream().use { r.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -192,6 +202,7 @@ object RainViewer {
         )
     }
 
+    /** The picture [save] kept for a flight, or null when there's none or it can't be read. */
     private fun load(id: String): RadarImage? = runCatching {
         val d = dir ?: return null
         val m = java.io.File(d, "$id.txt").readText().split(",")
@@ -202,6 +213,7 @@ object RainViewer {
         )
     }.getOrNull()
 
+    /** Radar over [f]'s route: the latest frame, or once it has landed, the frame nearest the middle of the flight. */
     private suspend fun fetch(f: Flight): RadarImage? {
         val o = f.origin!!; val d = f.dest!!
         // Landed: the frame closest to the middle of the flight (RainViewer keeps two hours), until the rain map is out.

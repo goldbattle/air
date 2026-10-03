@@ -11,7 +11,7 @@ import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** Formatters (Ui.kt), weather and flags, geography, and the text the widget and cards show. */
+/** Formatters (util/Format.kt), weather and flags, geography, and the text the widget and cards show. */
 class FormatTest : AirTest() {
     @Test
     fun spans() {

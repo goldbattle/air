@@ -40,6 +40,7 @@ import kotlinx.coroutines.delay
 
 // ---------- Phase panels ----------
 
+/** A panel's headline ("Departs in 3h 10m") with an optional line under it. */
 @Composable
 private fun Big(text: String, sub: String? = null, color: Color = C.label) = Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
     Text(text, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = color)
@@ -69,15 +70,22 @@ private fun smallSuffix(v: String) = androidx.compose.ui.text.buildAnnotatedStri
     }
 }
 
+/** One cell for [StatRow]: label, value, optional color. */
 private fun stat(label: String, value: String, color: Color? = null) = Triple(label, value, color)
 
+/** Time left until [to], or "" once it has passed. */
 private fun countdown(to: Instant, now: Instant): String {
     val d = Duration.between(now, to)
     return if (d.isNegative) "" else span(d)
 }
 
+/** The time right now in [zone]. */
 private fun localNow(zone: ZoneId) = time(Instant.now(), zone)
 
+/**
+ * Before the airport: the countdown, estimated boarding, seat and flight time, and the confirmation and seat to fill
+ * in.
+ */
 @Composable
 internal fun PreTravelPanel(f: Flight, now: Instant, onEdit: (EditRequest) -> Unit) {
     val dep = f.dep ?: f.depGuess
@@ -106,6 +114,9 @@ internal fun PreTravelPanel(f: Flight, now: Instant, onEdit: (EditRequest) -> Un
     TimezoneCell(f)
 }
 
+/**
+ * At the airport: departs in (or departed), the delay, terminal, gate and time, the takeoff weather and the airport.
+ */
 @Composable
 internal fun DeparturePanel(f: Flight, now: Instant) {
     val delay = f.depDelay
@@ -142,6 +153,10 @@ internal fun DeparturePanel(f: Flight, now: Instant) {
     }
 }
 
+/**
+ * The flight itself: time to landing and a progress line, then live speed, altitude, heading and distance while the
+ * plane broadcasts, or the plan until it does.
+ */
 @Composable
 internal fun InFlightPanel(f: Flight, now: Instant) {
     val l = f.live?.takeIf { f.isAirborne }
@@ -195,6 +210,10 @@ internal fun InFlightPanel(f: Flight, now: Instant) {
     }
 }
 
+/**
+ * After landing: when, how late, the arrival terminal, gate and baggage belt, landing weather, the airport and the time
+ * zone change.
+ */
 @Composable
 internal fun ArrivalPanel(f: Flight, now: Instant) {
     val delay = f.arrDelay
@@ -224,6 +243,7 @@ internal fun ArrivalPanel(f: Flight, now: Instant) {
     TimezoneCell(f)
 }
 
+/** The time difference between the two airports at landing, when there is one. */
 @Composable
 private fun TimezoneCell(f: Flight) {
     val at = f.arr ?: f.arrGuess
@@ -243,6 +263,7 @@ private fun TimezoneCell(f: Flight) {
     }
 }
 
+/** A row for an airport that opens its page. */
 @Composable
 private fun AirportCell(code: String, subtitle: String) {
     val a = Db.airport(code)
@@ -252,6 +273,7 @@ private fun AirportCell(code: String, subtitle: String) {
     ) { Nav.push(Screen.AirportInfo(code)) }
 }
 
+/** Weather at takeoff or landing ([event]), marked as a forecast while it's still ahead. */
 @Composable
 private fun WeatherCell(w: Wx?, event: String, city: String) {
     if (w == null) return
@@ -360,6 +382,7 @@ internal fun YourPlane(f: Flight, now: Instant) {
     }
 }
 
+/** Red when 15 minutes or more late, green when known and not, nothing when unknown. */
 private fun delayColor(delay: Long?): Color? = when {
     delay == null -> null
     delay >= 15 -> C.red
@@ -369,6 +392,10 @@ private fun delayColor(delay: Long?): Color? = when {
 
 // ---------- Schedule card ----------
 
+/**
+ * The schedule: both ends with their times, delays, weather, gates and belt, and the route weather between. Tapping a
+ * time sets it by hand.
+ */
 @Composable
 internal fun TimesCard(f: Flight) {
     val ctx = LocalContext.current
@@ -398,6 +425,7 @@ internal fun TimesCard(f: Flight) {
     if (!f.hasTimes) Footnote("Tap a time to set it. With an AeroDataBox or FlightAware key, times fill in automatically.")
 }
 
+/** One end of the schedule: airport code and name, chips (terminal, gate, bags), and the time colored by delay. */
 @Composable
 private fun TimeRow(code: String, name: String?, best: Instant?, sched: Instant?, zone: ZoneId, delay: Long?, wx: Wx?, chips: List<String>, onClick: () -> Unit) = Row(
     Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp),
@@ -427,6 +455,7 @@ private fun TimeRow(code: String, name: String?, best: Instant?, sched: Instant?
 
 // ---------- Details & actions ----------
 
+/** Details to read and edit: airline (opens its guide), work trip, aircraft, traveler, booking code, seat and notes. */
 @Composable
 internal fun DetailsGroup(f: Flight, onEdit: (EditRequest) -> Unit) = Group {
     val airline = Db.airline(f.airline)

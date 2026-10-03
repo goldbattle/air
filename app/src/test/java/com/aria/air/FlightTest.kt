@@ -10,7 +10,7 @@ import org.junit.Test
 import java.time.Duration
 import java.time.LocalTime
 
-/** Phases, status, delays, the live fix and the inbound plane (Data.kt). */
+/** Phases, status, delays, the live fix and the inbound plane (data/FlightStatus.kt, Inbound.kt). */
 class FlightTest : AirTest() {
     private val sfo get() = Db.airport("SFO")!!
 

@@ -88,6 +88,11 @@ fun mergeAdds(old: Flight, f: Found): List<String> = listOfNotNull(
     "times".takeIf { old.depSched == null && f.dep != null || old.arrSched == null && f.arr != null },
 )
 
+/**
+ * This document's flight as a [Flight] for [friend] ("" = me), its times placed in each airport's time zone (an arrival
+ * before departure is the next day). Missing airports come from [route]. Null when it still has no date or airports,
+ * since then it can't be saved.
+ */
 fun Found.toFlight(route: List<String>, friend: String, work: Boolean): Flight? {
     val d = date ?: return null
     val from = from ?: route.firstOrNull() ?: return null

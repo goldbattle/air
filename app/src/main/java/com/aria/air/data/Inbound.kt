@@ -14,14 +14,17 @@ data class Inbound(
     val callsign: String, val from: String, val to: String,
     val lat: Double, val lon: Double, val altFt: Int, val speedKt: Int, val onGround: Boolean,
     val eta: Instant?, val at: Instant,
+
     /** When we saw it touch down at our airport (null if it was already parked when we started watching). */
     val landedAt: Instant? = null,
+
     /** First time we saw it at all, to tell "landed an hour ago" from "was already there, probably overnight". */
     val firstSeen: Instant = at,
 ) {
     /** "UA 523" from the callsign "UAL523". */
     val label: String get() = Db.airlinesByIcao[callsign.take(3)]?.let { "${it.iata} ${callsign.drop(3)}" } ?: callsign
 }
+
 /** Minutes between the inbound plane reaching our airport and our departure, or null when unknown. */
 fun Flight.inboundSpare(): Long? = inbound?.eta?.let { Duration.between(it, dep ?: depGuess).toMinutes() }
 

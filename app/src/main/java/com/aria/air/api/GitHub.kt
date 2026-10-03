@@ -11,6 +11,7 @@ import org.json.JSONObject
 object GitHub {
     private const val LATEST = "https://api.github.com/repos/goldbattle/air/releases/latest"
 
+    /** A release: its build number ([code]), version name, and where to download the APK. */
     data class Release(val code: Int, val name: String, val apk: String)
 
     /** Tags are "v" + versionName, and versionName is "1.0.<versionCode>", so the build number is the last part. */

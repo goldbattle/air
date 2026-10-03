@@ -37,11 +37,19 @@ import java.time.Instant
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** The objects in a JSON array, skipping anything else; empty for null. */
 private fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+
+/** The non-empty strings in a JSON array; empty for null. */
 private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { optString(it) }.filter { it.isNotEmpty() }
 
+/** Opens [url] in the browser; nothing happens when no app can. */
 private fun openUrl(ctx: Context, url: String) = runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
 
+/**
+ * An airport's page: name, local time, and your flights there on a map, then its bundled guide (terminals, maps,
+ * lounges, getting there, tips) when there is one.
+ */
 @Composable
 fun AirportScreen(code: String) {
     val ctx = LocalContext.current
@@ -152,6 +160,7 @@ fun AirportScreen(code: String) {
     zoom?.let { ZoomDialog(it) { zoom = null } }
 }
 
+/** An airline's page: codes, alliance, hubs, your flights with it, and its guide (check-in, baggage, tips, links). */
 @Composable
 fun AirlineScreen(code: String) {
     val al = Db.airline(code)
@@ -183,6 +192,7 @@ fun AirlineScreen(code: String) {
     }
 }
 
+/** A guide's links, each opening in the browser. */
 @Composable
 private fun Links(g: JSONObject) {
     val ctx = LocalContext.current
@@ -197,6 +207,7 @@ private fun Links(g: JSONObject) {
     }
 }
 
+/** A terminal map full screen: pinch to zoom, drag to pan, tap to close. */
 @Composable
 private fun ZoomDialog(img: ImageBitmap, onDismiss: () -> Unit) = Dialog(onDismiss, DialogProperties(usePlatformDefaultWidth = false)) {
     var scale by remember { mutableFloatStateOf(1f) }

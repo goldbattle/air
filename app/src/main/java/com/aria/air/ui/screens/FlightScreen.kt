@@ -41,12 +41,20 @@ import java.time.Duration
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * Refreshes the flight in the app scope (leaving the page doesn't cancel it), then its past routes; [done] runs once
+ * the status part is saved.
+ */
 private fun refreshNow(ctx: android.content.Context, id: String, force: Boolean = false, done: () -> Unit = {}) = App.scope.launch {
     Store.get(id)?.let { refreshAndSave(ctx, it, force) }
     done()
-    Store.get(id)?.let { PastRoutes.update(it, force) } // recent paths of this flight number (Routes.kt)
+    Store.get(id)?.let { PastRoutes.update(it, force) } // recent paths of this flight number (PastRoutes)
 }
 
+/**
+ * A flight's page: the route map with the title, the legs of a connection, the phase panels, your plane, the schedule,
+ * details and actions. Refreshes on opening, and every minute while the flight is near or in the air.
+ */
 @Composable
 fun FlightScreen(id: String) {
     val f = Store.get(id)
@@ -154,6 +162,7 @@ fun FlightScreen(id: String) {
     )
 }
 
+/** A round button floating over the map (back, debug, share). */
 @Composable
 private fun FloatingButton(icon: ImageVector, description: String, onClick: () -> Unit) = Box(
     Modifier.size(40.dp).clip(CircleShape).background(C.card.copy(alpha = 0.92f)).clickable(onClick = onClick),
@@ -185,21 +194,22 @@ private fun LegBar(f: Flight, legs: List<Flight>) = Group {
     }
 }
 
+/** The map behind the title, with the radar and route weather layers. Tapping it opens the full-screen map. */
 @Composable
 private fun MapHeader(f: Flight, pulls: Int) {
     val o = f.origin; val d = f.dest
-    var full by remember { mutableStateOf(false) } // full-screen map (RainViewer.kt)
+    var full by remember { mutableStateOf(false) } // full-screen map (FullMap.kt)
     if (full) FullMap(f, pulls) { full = false }
     // The map runs behind the title; the route sits in the upper part and a gradient keeps the title readable.
     Box(Modifier.fillMaxWidth().clickable(interactionSource = null, indication = null) { full = true }) {
         if (o != null && d != null) {
-            val radar = rememberWeatherMap(f, pulls) // live radar, or the rain during the flight (NasaGibs.kt)
+            val radar = rememberWeatherMap(f, pulls) // live radar, or the rain during the flight (MapLayers.kt)
             val wx = f.routeWx?.takeIf { Layers.weather }
             WorldMap(
                 listOf(MapRoute(o, d, highlight = true)), Modifier.matchParentSize(), focus = true, centerY = 0.36f,
                 plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
                 under = radar?.let { r -> { x, y -> drawWeatherMap(r, x, y, 0.5f) } }, // radar layer
-                over = wx?.let { w -> { x, y -> drawRouteWx(w, o.lon, x, y) } }, // route weather layer (RouteWx.kt)
+                over = wx?.let { w -> { x, y -> drawRouteWx(w, o.lon, x, y) } }, // route weather layer (MapLayers.kt)
             )
         }
         Box(
@@ -211,6 +221,7 @@ private fun MapHeader(f: Flight, pulls: Int) {
     }
 }
 
+/** Airline badge, flight number and status, the two cities and the date. */
 @Composable
 private fun Title(f: Flight) = Column(Modifier.padding(start = 4.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -256,6 +267,7 @@ private fun PhaseBar(f: Flight, current: Phase, shown: Phase, onSelect: (Phase) 
     }
 }
 
+/** Move between my flights and friends', and delete. */
 @Composable
 private fun ActionsGroup(f: Flight, onEdit: (EditRequest) -> Unit, onDelete: () -> Unit) = Group {
     if (f.mine) {
@@ -271,12 +283,14 @@ private fun ActionsGroup(f: Flight, onEdit: (EditRequest) -> Unit, onDelete: () 
     Cell("Delete flight", color = C.red, icon = Icons.Filled.Delete, iconTint = C.red, onClick = onDelete)
 }
 
+/** Where the page's data came from and how fresh it is, for the footnote. */
 private fun sources(f: Flight) = buildList {
     f.updated?.let { add("Status updated ${ago(it)}") }
     f.live?.let { add("Live position from adsb.lol ${ago(it.at)}") }
     add("Added via ${f.source}")
 }.joinToString(" · ")
 
+/** Shares the flight as a short text: route, date, times and status. */
 private fun share(ctx: android.content.Context, f: Flight) {
     val text = buildString {
         append("${f.label} ${f.origin?.city ?: f.from} (${f.from}) → ${f.dest?.city ?: f.to} (${f.to}), ${longDay(f.date)}")

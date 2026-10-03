@@ -88,6 +88,7 @@ object AdsbLol {
     /** The plane's trace for one UTC [day] from adsb.lol's daily history (kept about a month). */
     fun history(day: java.time.LocalDate, hex: String): String =
         Http.get("https://adsb.lol/globe_history/${day.toString().replace('-', '/')}/traces/${hex.takeLast(2)}/trace_full_$hex.json")
+
     /**
      * A readsb trace file (adsb.lol): rows of [secs after "timestamp", lat, lon, alt ft or "ground", gs, track, flags
      * (2 = new leg), vrate, {flight: callsign} now and then, ...]. As (callsign so far, new leg, airborne point or null).
@@ -159,6 +160,7 @@ object AdsbLol {
         val hex = f.hex.lowercase().takeIf { it.length == 6 } ?: return@withContext null
         arrivedHere(trace(hex), f, Instant.now(clock))
     }
+
     /** The plane's ICAO hex from adsb.lol: by tail number, or by callsign while it still broadcasts it. */
     fun lookupHex(f: Flight): String {
         val url = if (f.reg.isNotEmpty()) "https://api.adsb.lol/v2/reg/${f.reg}" else "https://api.adsb.lol/v2/callsign/${callsign(f.airline, f.number)}"
