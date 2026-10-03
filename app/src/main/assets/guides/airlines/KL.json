@@ -1,6 +1,7 @@
 {
   "iata": "KL",
   "color": "#00A1DE",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:KLM_logo.svg", "license": "Public domain (trademarked)"},
   "alliance": "SkyTeam",
   "hubs": ["AMS"],
   "summary": "The Dutch flag carrier, hub at Amsterdam Schiphol; part of Air France-KLM.",

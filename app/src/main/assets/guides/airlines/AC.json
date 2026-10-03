@@ -1,6 +1,7 @@
 {
   "iata": "AC",
   "color": "#F01428",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Air_Canada_2017.svg", "license": "Public domain (trademarked)"},
   "alliance": "Star Alliance",
   "hubs": ["YYZ", "YUL", "YVR", "YYC"],
   "summary": "Canada's largest airline, based in Montreal.",

@@ -1,6 +1,7 @@
 {
   "iata": "AF",
   "color": "#002157",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Air_France_Logo.svg", "license": "Public domain (trademarked)"},
   "alliance": "SkyTeam",
   "hubs": ["CDG"],
   "summary": "France's flag carrier, hub at Paris-Charles de Gaulle; part of Air France-KLM.",

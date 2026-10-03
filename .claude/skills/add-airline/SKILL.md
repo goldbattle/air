@@ -16,10 +16,10 @@ The badge on every flight card shows that icon, else a monogram on the guide's `
 2. **Research** with WebSearch/WebFetch from the airline's own site: alliance, hubs (IATA codes), when online check-in
    opens, carry-on and first checked bag rules for the basic economy / main cabin fares, and 2–5 practical tips.
    Only write what you found a source for.
-3. **Icon** (optional): the airline's emblem, not its wordmark, from Wikimedia Commons only (public domain / PD-textlogo /
-   CC; skip fair-use files). Crop the symbol from Commons' PNG rendering, trim, center it on a 96×96 transparent PNG with
+3. **Icon**: the airline's emblem (its wordmark only if it has no emblem) from Wikipedia or Wikimedia Commons; fair-use
+   logos are fine. Crop the symbol from the wiki's PNG rendering, trim, center it on a 96×96 transparent PNG with
    16% padding per side. It sits on light gray unless drawn in white (then add its brand color to `Guides.airlineIconBg`).
-   Add the source URL, author and license to `airline-icons/CREDITS.md`. No emblem on Commons: leave it out.
+   Put its source URL and license in the guide JSON as `"icon": {"source": ..., "license": ...}`.
 4. **Write the JSON** (all fields optional except `iata`):
 
 ```json

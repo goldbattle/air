@@ -1,6 +1,7 @@
 {
   "iata": "DL",
   "color": "#C8102E",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Delta_Air_Lines_2007_symbol.svg", "license": "Public domain (trademarked)"},
   "alliance": "SkyTeam",
   "hubs": ["ATL", "DTW", "MSP", "SLC", "JFK", "LGA", "BOS", "LAX", "SEA"],
   "summary": "Atlanta-based; its biggest hub, ATL, is one of the world's busiest airports.",

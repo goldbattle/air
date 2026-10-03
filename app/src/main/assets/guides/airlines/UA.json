@@ -1,6 +1,7 @@
 {
   "iata": "UA",
   "color": "#0033A0",
+  "icon": {"source": "https://en.wikipedia.org/wiki/File:United_Airlines_Logo.svg", "license": "Fair use (trademarked logo)"},
   "alliance": "Star Alliance",
   "hubs": ["ORD", "DEN", "IAH", "EWR", "SFO", "IAD", "LAX", "GUM"],
   "summary": "Chicago-based; the main US member of Star Alliance.",

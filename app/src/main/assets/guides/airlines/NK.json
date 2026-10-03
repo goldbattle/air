@@ -1,6 +1,7 @@
 {
   "iata": "NK",
   "color": "#6D6E71",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Spirit_Airlines_logo.svg", "license": "Public domain (trademarked)"},
   "summary": "Spirit Airlines began an orderly wind-down and stopped flying on May 2, 2026. It is kept here for past flights.",
   "links": [
     { "title": "Wind-down announcement", "url": "https://ir.spirit.com/news/news-details/2026/Spirit-Airlines-Begins-Orderly-Wind-Down-of-Operations/default.aspx" }

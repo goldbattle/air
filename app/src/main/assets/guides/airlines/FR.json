@@ -1,6 +1,7 @@
 {
   "iata": "FR",
   "color": "#073590",
+  "icon": {"source": "https://en.wikipedia.org/wiki/File:Ryanair.svg", "license": "Fair use (trademarked logo)"},
   "hubs": ["DUB", "STN"],
   "summary": "Irish low-cost airline and Europe's biggest by passengers. Boarding passes are digital only, in the Ryanair app.",
   "checkin": "Without a reserved seat, free online check-in runs from 24 to 2 hours before departure. Airport check-in (until 40 minutes before) costs an airport check-in fee.",

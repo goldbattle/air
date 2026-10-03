@@ -1,6 +1,7 @@
 {
   "iata": "BA",
   "color": "#075AAA",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:British_Airways-Logo.wine_(1).png", "license": "CC0"},
   "alliance": "oneworld",
   "hubs": ["LHR", "LGW"],
   "summary": "The UK's flag carrier, main hub at London Heathrow.",

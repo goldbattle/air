@@ -1,6 +1,7 @@
 {
   "iata": "B6",
   "color": "#003876",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:JetBlue_Airways_Logo.svg", "license": "Public domain (trademarked)"},
   "hubs": ["JFK", "BOS", "FLL", "MCO", "SJU"],
   "summary": "New York-based low-fare airline, with its biggest base at JFK.",
   "checkin": "Check-in, and adding bags, opens 24 hours before departure.",

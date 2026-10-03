@@ -1,6 +1,7 @@
 {
   "iata": "AA",
   "color": "#0078D2",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:AA_Symbol.svg", "license": "Public domain (trademarked)"},
   "alliance": "oneworld",
   "hubs": ["DFW", "CLT", "ORD", "MIA", "PHL", "PHX", "DCA", "JFK", "LAX"],
   "summary": "Fort Worth-based; the largest US airline, with its main hub at Dallas/Fort Worth.",

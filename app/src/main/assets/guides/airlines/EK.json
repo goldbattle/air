@@ -1,6 +1,7 @@
 {
   "iata": "EK",
   "color": "#D71921",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Emirates_logo.svg", "license": "Public domain (trademarked)"},
   "hubs": ["DXB"],
   "summary": "Dubai-based; nearly every route connects through Terminal 3 at Dubai International.",
   "checkin": "Online check-in opens 48 hours before departure and closes 90 minutes before.",

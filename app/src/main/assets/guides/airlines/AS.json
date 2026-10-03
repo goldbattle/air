@@ -1,6 +1,7 @@
 {
   "iata": "AS",
   "color": "#01426A",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Alaska_Airlines_logo.svg", "license": "Public domain (trademarked)"},
   "alliance": "oneworld",
   "hubs": ["SEA", "PDX", "ANC", "SFO", "LAX", "HNL"],
   "summary": "Seattle-based; merged with Hawaiian Airlines, and both share one baggage policy and the Atmos Rewards program.",

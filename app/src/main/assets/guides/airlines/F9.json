@@ -1,6 +1,7 @@
 {
   "iata": "F9",
   "color": "#1E7B4D",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Frontier_Airlines_logo.svg", "license": "Public domain (trademarked)"},
   "hubs": ["DEN"],
   "summary": "Denver-based ultra-low-cost airline: the fare covers your seat and one personal item, everything else is extra.",
   "checkin": "Check-in opens 24 hours before departure. Check-in and bag drop close 1 hour before departure; ticket counters usually open 2 hours before.",

@@ -1,6 +1,7 @@
 {
   "iata": "WN",
   "color": "#304CB2",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Southwest_Airlines_logo_2014.svg", "license": "Public domain (trademarked)"},
   "summary": "Dallas-based and mostly point-to-point, with no single hub. All flights now have assigned seats.",
   "checkin": "Check-in, and digital bag check, opens 24 hours before departure. Basic fares get a seat assigned at check-in; higher fares can pick seats earlier.",
   "baggage": "Carry-on and personal item are free. US mainland checked bags (booked on or after April 9, 2026): 1st $45, 2nd $55, up to 50 lb and 62 in. Choice Extra fares include 2 free bags.",

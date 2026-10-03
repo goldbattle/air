@@ -1,6 +1,7 @@
 {
   "iata": "LH",
   "color": "#05164D",
+  "icon": {"source": "https://commons.wikimedia.org/wiki/File:Lufthansa_Logo_2018_crane.svg", "license": "Public domain (trademarked)"},
   "alliance": "Star Alliance",
   "hubs": ["FRA", "MUC"],
   "summary": "Germany's flag carrier, based in Cologne with hubs in Frankfurt and Munich.",
