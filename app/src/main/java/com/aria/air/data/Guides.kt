@@ -42,7 +42,7 @@ object Guides {
     fun airlineIcon(code: String) = image("airline-icons/${code.uppercase()}.png")
 
     /** Light gray behind colored emblems (shows on white cards); brand color behind the ones drawn in white. */
-    fun airlineIconBg(code: String) = Color(when (code.uppercase()) { "LH" -> 0xFF05164D; "KL" -> 0xFF00A1DE; else -> 0xFFF2F2F7 })
+    fun airlineIconBg(code: String) = Color(when (code.uppercase()) { "LH" -> 0xFF05164D; "KL" -> 0xFF00A1DE; "FR" -> 0xFFF1C933; else -> 0xFFF2F2F7 })
 
     private val palette = listOf(0xFF0A84FF, 0xFF5E5CE6, 0xFFFF375F, 0xFF30B0C7, 0xFFFF9F0A, 0xFF34C759, 0xFFAF52DE, 0xFF8E8E93)
 
