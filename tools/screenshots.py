@@ -268,27 +268,15 @@ CAPTIONS = [
 
 
 # Only these make the README; the rest are still captured into docs/screenshots for reference.
-README_SELECT = ["flights", "flight_live", "passport"]
+README_SELECT = ["flights", "flight_live", "notifications", "passport"]
 
 
 def update_readme() -> None:
-    have = [(n, t, c) for n, t, c in CAPTIONS if n in README_SELECT and (OUT / f"{n}.png").exists()]
-    rows = []
-    for i in range(0, len(have), 3):
-        chunk = have[i:i + 3]
-        rows.append("| " + " | ".join(f"**{t}**" for _, t, _ in chunk) + " |")
-        if i == 0:
-            rows.append("|" + "---|" * len(chunk))
-        rows.append("| " + " | ".join(f'<img src="docs/screenshots/{n}.png" width="260">' for n, _, _ in chunk) + " |")
-        rows.append("| " + " | ".join(c for _, _, c in chunk) + " |")
+    have = [n for n in README_SELECT if (OUT / f"{n}.png").exists()]
+    imgs = " ".join(f'<img src="docs/screenshots/{n}.png" width="200" alt="{n}">' for n in have)
     section = "\n".join([
         "<!-- screenshots:start -->",
-        "## Screenshots",
-        "",
-        "Made-up example data (the two flights in the air are real flights at the time of capture). "
-        "Regenerate with `python tools/screenshots.py`.",
-        "",
-        *rows,
+        f'<p align="center">{imgs}</p>',
         "<!-- screenshots:end -->",
     ])
     readme = ROOT / "README.md"
@@ -387,18 +375,90 @@ def tour(live_labels: list[str]) -> None:
     time.sleep(2)
     shot("settings")
 
-    print("Notifications")
-    shell("cmd statusbar expand-notifications")
-    time.sleep(3)
-    shot("notifications")
-    shell("cmd statusbar collapse")
-    time.sleep(1)
 
     print("Widget")
     add_widget()
     shell("input keyevent KEYCODE_HOME")
     time.sleep(3)
     shot("widget")
+
+
+def shade_card(f: dict) -> "Image.Image | None":
+    """Air's notification for one flight, on a fresh install (the only way to clear the emulator's old notifications)
+    with just that flight and its reminders/alerts marked sent, so the live notification is alone and expanded."""
+    from PIL import Image  # pip install pillow
+    apk = ROOT / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
+    adb("uninstall", PKG, check=False)
+    adb("install", str(apk))
+    shell(f"pm grant {PKG} android.permission.POST_NOTIFICATIONS", check=False)
+    shell(f"am start -n {PKG}/.MainActivity")
+    time.sleep(4)
+    share_text(json.dumps({"app": "air", "version": 1, "name": "Alex Rivera",
+                           "flights": [dict(f, alerted="checkin,reminder,departed,landed")]}))
+    time.sleep(8)
+    # Run the background check now rather than whenever WorkManager gets to it.
+    for j in set(re.findall(r"androidx\.work\.systemjobscheduler:u\d+/(\d+)", shell(f"dumpsys jobscheduler {PKG}", check=False))):
+        shell(f"cmd jobscheduler run -f -n androidx.work.systemjobscheduler {PKG} {j}", check=False)
+    time.sleep(25)
+    shell("input keyevent KEYCODE_HOME")
+    time.sleep(2)
+    xml = ""
+    for _ in range(8):  # a swipe from the top, as a person would; the statusbar command alone is unreliable
+        shell("input swipe 540 2 540 1600 300")
+        time.sleep(1)
+        shell("cmd statusbar expand-notifications")
+        time.sleep(3)
+        shell("uiautomator dump /sdcard/ui.xml", check=False)
+        xml = shell("cat /sdcard/ui.xml", check=False)
+        if "expandableNotificationRow" in xml:
+            break
+    path = OUT / "_shade.png"
+    with open(path, "wb") as fh:
+        subprocess.run([ADB, "exec-out", "screencap", "-p"], stdout=fh, check=True)
+    shell("cmd statusbar collapse")
+    shade = Image.open(path).convert("RGB")
+    path.unlink()
+    label = f"{f['airline']} {f['number']}"
+    num = r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]"
+    rows = [tuple(map(int, m.groups())) for m in re.finditer(r'expandableNotificationRow"[^>]*?bounds="' + num, xml)]
+    texts = [(m.group(1), *map(int, m.groups()[1:])) for m in re.finditer(r'text="([^"]*)"[^>]*?bounds="' + num, xml)]
+    hits = [r for r in rows if any(label in t and r[0] <= (x0 + x1) / 2 <= r[2] and r[1] <= (y0 + y1) / 2 <= r[3]
+                                   for t, x0, y0, x1, y1 in texts)]
+    if not hits:
+        print(f"  ! no notification for {label}")
+        return None
+    return shade.crop(min(hits, key=lambda r: r[3] - r[1]))
+
+
+def notification_stages() -> None:
+    """Before the airport, at the airport and in the air, each card captured on its own and stacked to about a phone
+    screen's shape. Reinstalls the app for each, so run it last."""
+    from PIL import Image
+    now = dt.datetime.now(dt.timezone.utc)
+
+    def bos(hours: float, fn: int, al: str, **extra) -> dict:
+        dep = now + dt.timedelta(hours=hours + OFFSET["BOS"])
+        return flight(al, fn, dep.date(), "BOS", "ATL", dep.strftime("%H:%M"),
+                      (dep + dt.timedelta(hours=2, minutes=40)).strftime("%H:%M"), **extra)
+
+    stages = [bos(3.5, 1180, "DL", seat="14A"), bos(0.7, 2244, "B6", seat="9F")]
+    live = airborne(1)
+    if live:
+        al, num, frm, to, _ = live[0]
+        stages.append(flight(al, num, dt.date.today(), frm, to))
+    cards = [c for c in (shade_card(f) for f in stages) if c is not None]
+    if not cards:
+        return
+    w = max(c.width for c in cards)
+    gap = 36
+    h = sum(c.height for c in cards) + gap * (len(cards) + 1)
+    out = Image.new("RGB", (w + 2 * gap, max(h, int((w + 2 * gap) * 2.0))), (238, 238, 243))  # a phone screen's shape
+    y = (out.height - h) // 2 + gap
+    for c in cards:
+        out.paste(c, (gap, y))
+        y += c.height + gap
+    out.resize((out.width * 2 // 5, out.height * 2 // 5)).save(OUT / "notifications.png", optimize=True)
+    print(f"  saved docs/screenshots/notifications.png ({len(cards)} stages)")
 
 
 def main() -> None:
@@ -422,6 +482,8 @@ def main() -> None:
     time.sleep(8)  # first background check: live positions, weather backfill
 
     tour(live_labels)
+    print("Notifications (each stage on its own; resets the app)")
+    notification_stages()
     if not args.no_readme:
         update_readme()
 
