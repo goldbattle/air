@@ -2,6 +2,16 @@
   "iata": "UA",
   "color": "#0033A0",
   "alliance": "Star Alliance",
-  "hubs": ["SFO", "ORD", "DEN", "IAH", "EWR", "IAD", "LAX"],
-  "links": [{ "title": "united.com", "url": "https://www.united.com" }]
+  "hubs": ["ORD", "DEN", "IAH", "EWR", "SFO", "IAD", "LAX", "GUM"],
+  "summary": "Chicago-based; the main US member of Star Alliance.",
+  "checkin": "Online and app check-in opens 24 hours before departure. Airport check-in begins no earlier than 4 hours before departure.",
+  "baggage": "Basic Economy on domestic flights includes only a personal item; other fares add a carry-on. Checked bag fees are set by the airline marketing the first flight; MileagePlus Premier members and United cardmembers check bags free.",
+  "tips": [
+    "Use United's bag fee calculator (sign in or pick any flight) to see what you'll pay.",
+    "United recommends arriving 2 hours before domestic and 3 hours before international flights."
+  ],
+  "links": [
+    { "title": "Checked bags", "url": "https://www.united.com/en/us/fly/baggage/checked-bags.html" },
+    { "title": "united.com", "url": "https://www.united.com" }
+  ]
 }

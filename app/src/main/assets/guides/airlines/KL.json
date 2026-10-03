@@ -1,0 +1,17 @@
+{
+  "iata": "KL",
+  "color": "#00A1DE",
+  "alliance": "SkyTeam",
+  "hubs": ["AMS"],
+  "summary": "The Dutch flag carrier, hub at Amsterdam Schiphol; part of Air France-KLM.",
+  "checkin": "Online check-in opens 30 hours before departure.",
+  "baggage": "Economy Light, Standard and Flex: 1 small bag (40 x 30 x 15 cm) plus 1 hand baggage (55 x 35 x 25 cm), 12 kg combined. Light tickets include no checked bag. Within Europe, Basic tickets cover only the small bag.",
+  "tips": [
+    "Add hand or checked baggage to a Basic or Light ticket before you fly."
+  ],
+  "links": [
+    { "title": "Checked baggage", "url": "https://www.klm.com/information/baggage/checked-baggage-allowance" },
+    { "title": "Hand baggage", "url": "https://www.klm.com/information/baggage/hand-baggage-allowance" },
+    { "title": "Check-in times", "url": "https://www.klm.com/information/airport/check-in-times" }
+  ]
+}

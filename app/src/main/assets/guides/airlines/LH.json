@@ -1,0 +1,18 @@
+{
+  "iata": "LH",
+  "color": "#05164D",
+  "alliance": "Star Alliance",
+  "hubs": ["FRA", "MUC"],
+  "summary": "Germany's flag carrier, based in Cologne with hubs in Frankfurt and Munich.",
+  "checkin": "Online and app check-in opens 30 hours before departure (on some routes later).",
+  "baggage": "A carry-on can weigh up to 8 kg and measure 55 x 40 x 23 cm. On European routes the cheapest fares include no checked bag, and Economy Light covers only a personal item (40 x 30 x 15 cm) under the seat; a carry-on can be added for a fee.",
+  "tips": [
+    "Check your fare's allowance before packing; it differs between European and long-haul routes.",
+    "Online check-in also works for flights operated by SWISS and Austrian."
+  ],
+  "links": [
+    { "title": "Free baggage rules", "url": "https://www.lufthansa.com/us/en/freigepaeck-regeln" },
+    { "title": "Carry-on baggage", "url": "https://www.lufthansa.com/us/en/carry-on-baggage" },
+    { "title": "Online check-in", "url": "https://www.lufthansa.com/us/en/online-check-in" }
+  ]
+}

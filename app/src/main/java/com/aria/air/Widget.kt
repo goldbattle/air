@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -251,11 +252,15 @@ private fun Empty() = Column(GlanceModifier.fillMaxSize(), verticalAlignment = A
 }
 
 @Composable
-private fun AirlineChip(f: Flight) = Box(
-    GlanceModifier.size(20.dp).background(ColorProvider(Guides.airlineColor(f.airline))).cornerRadius(5.dp),
-    contentAlignment = Alignment.Center,
-) {
-    Text(f.airline, style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold))
+private fun AirlineChip(f: Flight) {
+    val icon = Guides.airlineIcon(f.airline)
+    Box(
+        GlanceModifier.size(20.dp).background(ColorProvider(if (icon != null) Guides.airlineIconBg(f.airline) else Guides.airlineColor(f.airline))).cornerRadius(5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (icon != null) Image(ImageProvider(icon.asAndroidBitmap()), f.airline, GlanceModifier.fillMaxSize())
+        else Text(f.airline, style = TextStyle(color = ColorProvider(Color.White), fontSize = 9.sp, fontWeight = FontWeight.Bold))
+    }
 }
 
 /** Gate/seat before the flight, speed/altitude in the air, gate/bags after. */

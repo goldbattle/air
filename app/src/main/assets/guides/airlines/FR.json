@@ -1,0 +1,17 @@
+{
+  "iata": "FR",
+  "color": "#073590",
+  "hubs": ["DUB", "STN"],
+  "summary": "Irish low-cost airline and Europe's biggest by passengers. Boarding passes are digital only, in the Ryanair app.",
+  "checkin": "Without a reserved seat, free online check-in runs from 24 to 2 hours before departure. Airport check-in (until 40 minutes before) costs an airport check-in fee.",
+  "baggage": "The Basic fare includes 1 small bag (40 x 30 x 20 cm) that fits under the seat. A larger cabin bag comes with Priority, and checked bags cost extra.",
+  "tips": [
+    "Since November 12, 2025 boarding passes are only in the app; if you have no smartphone, check in online first and the airport prints one free.",
+    "Priority passengers at the gate 30 minutes before departure board first."
+  ],
+  "links": [
+    { "title": "Fare bundles", "url": "https://help.ryanair.com/hc/en-us/articles/12888555638161-What-are-Ryanair-s-fare-bundle-options" },
+    { "title": "When can I check in?", "url": "https://help.ryanair.com/hc/en-us/articles/12888949622417-When-can-I-check-in" },
+    { "title": "Digital boarding pass", "url": "https://www.ryanair.com/gb/en/lp/explore/digital-boarding-pass" }
+  ]
+}

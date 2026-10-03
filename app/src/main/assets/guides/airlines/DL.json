@@ -1,0 +1,18 @@
+{
+  "iata": "DL",
+  "color": "#C8102E",
+  "alliance": "SkyTeam",
+  "hubs": ["ATL", "DTW", "MSP", "SLC", "JFK", "LGA", "BOS", "LAX", "SEA"],
+  "summary": "Atlanta-based; its biggest hub, ATL, is one of the world's busiest airports.",
+  "checkin": "Online and app check-in opens 24 hours before departure. Domestic: bags must be checked 45 minutes before departure, check-in without bags closes 30 minutes before, and be at the gate 15 minutes before.",
+  "baggage": "A carry-on and a personal item are free. Domestic checked bags are $45 for the 1st and $55 for the 2nd (up to 50 lb / 23 kg, 62 in total).",
+  "tips": [
+    "Delta SkyMiles American Express cardholders get free checked bags on domestic Delta flights.",
+    "Delta recommends arriving 2 hours before domestic flights.",
+    "You can add and pay for bags in the Fly Delta app during check-in."
+  ],
+  "links": [
+    { "title": "Baggage and fees", "url": "https://www.delta.com/us/en/baggage/overview" },
+    { "title": "Domestic check-in times", "url": "https://www.delta.com/us/en/check-in-security/check-in-time-requirements/domestic-check-in" }
+  ]
+}

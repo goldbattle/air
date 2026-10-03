@@ -5,8 +5,8 @@ description: Add or update a bundled airline guide in the Air app (brand color, 
 
 # Add an airline guide
 
-Guides live in `app/src/main/assets/guides/airlines/<IATA>.json`; a logo goes next to it as `<IATA>.png`.
-The app uses `color` and `logo` for the badge on every flight card, and shows the rest on the airline page
+Guides live in `app/src/main/assets/guides/airlines/<IATA>.json`; an icon goes in `app/src/main/assets/airline-icons/<IATA>.png`.
+The badge on every flight card shows that icon, else a monogram on the guide's `color`; the rest shows on the airline page
 (`AirlineScreen` in `AirportScreen.kt`). Everything is bundled; nothing is fetched at runtime.
 
 ## Steps
@@ -16,16 +16,16 @@ The app uses `color` and `logo` for the badge on every flight card, and shows th
 2. **Research** with WebSearch/WebFetch from the airline's own site: alliance, hubs (IATA codes), when online check-in
    opens, carry-on and first checked bag rules for the basic economy / main cabin fares, and 2–5 practical tips.
    Only write what you found a source for.
-3. **Logo** (optional): a square PNG around 128×128 with a transparent or white background. Wikimedia Commons usually has
-   SVGs: `magick -background none -density 300 logo.svg -resize 128x128 -gravity center -extent 128x128 UA.png`.
-   Personal use only.
+3. **Icon** (optional): the airline's emblem, not its wordmark, from Wikimedia Commons only (public domain / PD-textlogo /
+   CC; skip fair-use files). Crop the symbol from Commons' PNG rendering, trim, center it on a 96×96 transparent PNG with
+   16% padding per side. It sits on light gray unless drawn in white (then add its brand color to `Guides.airlineIconBg`).
+   Add the source URL, author and license to `airline-icons/CREDITS.md`. No emblem on Commons: leave it out.
 4. **Write the JSON** (all fields optional except `iata`):
 
 ```json
 {
   "iata": "UA",
   "color": "#0033A0",
-  "logo": "UA.png",
   "alliance": "Star Alliance",
   "hubs": ["SFO", "ORD", "DEN", "IAH", "EWR", "IAD", "LAX"],
   "summary": "One sentence.",

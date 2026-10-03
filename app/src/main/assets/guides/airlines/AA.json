@@ -1,0 +1,18 @@
+{
+  "iata": "AA",
+  "color": "#0078D2",
+  "alliance": "oneworld",
+  "hubs": ["DFW", "CLT", "ORD", "MIA", "PHL", "PHX", "DCA", "JFK", "LAX"],
+  "summary": "Fort Worth-based; the largest US airline, with its main hub at Dallas/Fort Worth.",
+  "checkin": "Online and app check-in opens 24 hours before departure and closes 45 minutes before (90 for international). To check bags on US flights, be at the counter 45 minutes before departure.",
+  "baggage": "Every fare, including Basic Economy, gets a carry-on and a personal item. Domestic checked bags: 1st $45 prepaid / $50 at the airport, 2nd $55 / $60. Basic Economy (tickets from May 18, 2026): 1st $50 / $55, 2nd $60 / $65.",
+  "tips": [
+    "Prepay bags online or in the app to save $5 per bag.",
+    "AAdvantage status members and premium cabin passengers still get free bags.",
+    "American recommends arriving 2 hours before domestic flights."
+  ],
+  "links": [
+    { "title": "Checked bag policy", "url": "https://www.aa.com/i18n/travel-info/baggage/checked-baggage-policy.jsp" },
+    { "title": "Check-in and arrival times", "url": "https://www.aa.com/i18n/travel-info/check-in-and-arrival.jsp" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "iata": "B6",
+  "color": "#003876",
+  "hubs": ["JFK", "BOS", "FLL", "MCO", "SJU"],
+  "summary": "New York-based low-fare airline, with its biggest base at JFK.",
+  "checkin": "Check-in, and adding bags, opens 24 hours before departure.",
+  "baggage": "Every fare, including Blue Basic, includes a carry-on that fits in the overhead bin plus a personal item. Checked bag prices depend on the travel date (peak or off-peak).",
+  "tips": [
+    "Add bags at least 24 hours before departure to save $10 on each of your first 2 checked bags.",
+    "Eligible Mosaic members and some JetBlue cardholders get free checked bags."
+  ],
+  "links": [
+    { "title": "Checked bag policy", "url": "https://www.jetblue.com/help/checked-bags" },
+    { "title": "Optional services and fees", "url": "https://www.jetblue.com/legal/fees" },
+    { "title": "Check in online", "url": "https://www.jetblue.com/help/checking-in/check-in-online" }
+  ]
+}

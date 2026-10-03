@@ -1,0 +1,16 @@
+{
+  "iata": "BA",
+  "color": "#075AAA",
+  "alliance": "oneworld",
+  "hubs": ["LHR", "LGW"],
+  "summary": "The UK's flag carrier, main hub at London Heathrow.",
+  "checkin": "Online check-in opens 24 hours before departure in Manage My Booking or the app.",
+  "baggage": "Cabin: 1 bag up to 56 x 45 x 25 cm plus 1 handbag or backpack up to 40 x 30 x 15 cm. Economy Basic (hand baggage only) fares include no checked bag; standard Economy fares include 1 bag up to 23 kg.",
+  "tips": [
+    "On a Basic fare, adding a hold bag costs extra, so book a fare with a bag if you need one."
+  ],
+  "links": [
+    { "title": "Baggage essentials", "url": "https://www.britishairways.com/content/information/baggage-essentials" },
+    { "title": "Checking in", "url": "https://www.britishairways.com/content/information/checking-in-and-boarding/checking-in" }
+  ]
+}

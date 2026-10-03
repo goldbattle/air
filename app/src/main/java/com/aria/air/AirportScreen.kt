@@ -52,10 +52,14 @@ object Guides {
     fun airline(code: String) = json("guides/airlines/${code.uppercase()}.json")
 
     fun image(path: String): ImageBitmap? = images.getOrPut(path) {
-        runCatching { assets.open("guides/$path").use { BitmapFactory.decodeStream(it).asImageBitmap() } }.getOrNull()
+        runCatching { assets.open(path).use { BitmapFactory.decodeStream(it).asImageBitmap() } }.getOrNull()
     }
 
-    fun airlineLogo(code: String) = airline(code)?.optString("logo")?.takeIf { it.isNotEmpty() }?.let { image("airlines/$it") }
+    /** Airline emblem from assets/airline-icons (sources in CREDITS.md), drawn on [airlineIconBg]. */
+    fun airlineIcon(code: String) = image("airline-icons/${code.uppercase()}.png")
+
+    /** Light gray behind colored emblems (shows on white cards); brand color behind the ones drawn in white. */
+    fun airlineIconBg(code: String) = Color(when (code.uppercase()) { "LH" -> 0xFF05164D; "KL" -> 0xFF00A1DE; else -> 0xFFF2F2F7 })
 
     private val palette = listOf(0xFF0A84FF, 0xFF5E5CE6, 0xFFFF375F, 0xFF30B0C7, 0xFFFF9F0A, 0xFF34C759, 0xFFAF52DE, 0xFF8E8E93)
 
@@ -122,7 +126,7 @@ fun AirportScreen(code: String) {
             item("maps") {
                 SectionHeader("Maps")
                 maps.forEach { m ->
-                    val img = m.optString("image").takeIf { it.isNotEmpty() }?.let { Guides.image("airports/$it") }
+                    val img = m.optString("image").takeIf { it.isNotEmpty() }?.let { Guides.image("guides/airports/$it") }
                     Group(Modifier.padding(bottom = 10.dp)) {
                         if (img != null) Image(
                             img, m.optString("title"),

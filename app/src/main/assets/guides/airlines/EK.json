@@ -1,0 +1,16 @@
+{
+  "iata": "EK",
+  "color": "#D71921",
+  "hubs": ["DXB"],
+  "summary": "Dubai-based; nearly every route connects through Terminal 3 at Dubai International.",
+  "checkin": "Online check-in opens 48 hours before departure and closes 90 minutes before.",
+  "baggage": "Economy carry-on: 1 bag up to 7 kg, 55 x 38 x 22 cm. To/from the Americas (piece concept): Economy Special 1 x 23 kg, Saver/Flex/Flex Plus 2 x 23 kg. Elsewhere (weight concept): Economy 20/25/30/35 kg for Special/Saver/Flex/Flex Plus, max 32 kg per bag.",
+  "tips": [
+    "Skywards Gold and Platinum members get an extra checked bag on piece-concept routes.",
+    "Each checked bag must stay under 203 cm (length + width + height)."
+  ],
+  "links": [
+    { "title": "Checked baggage", "url": "https://www.emirates.com/us/english/before-you-fly/baggage/checked-baggage/" },
+    { "title": "Check-in options", "url": "https://www.emirates.com/us/english/manage-booking/check-in-options/" }
+  ]
+}
