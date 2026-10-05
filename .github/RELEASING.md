@@ -34,8 +34,3 @@ In GitHub, open Settings > Secrets and variables > Actions > New repository secr
 
 Then re-run the failed workflow from the Actions tab.
 
-## Switching from a locally built APK
-
-Local builds are signed with your machine's debug key, so the first release won't install over them. Export a backup
-(Settings > Import/Backup), uninstall, install the release, and import the backup. Mail app passwords aren't in
-backups, so re-enter them. Updates install in place from then on.
