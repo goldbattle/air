@@ -49,22 +49,6 @@ what's listed. Layers marked *off by default* make no requests until you turn th
 
 Backups are a JSON file you export yourself.
 
-## Code layout
-
-One Android module, `app`, under `app/src/main/java/com/aria/air/`:
-
-| Package | What lives there |
-|---|---|
-| `com.aria.air` | `App`, `MainActivity`, navigation, and the workers, receivers and widget class whose names Android stores |
-| `util` | Clock, geo math, formatting |
-| `data` | The flight model and its status logic, `Store` (flights.json, backups), `Prefs`, bundled airports and guides |
-| `api` | One client per service in the table above, over a shared `Http` helper |
-| `sync` | Deciding what to ask which service and when, and merging the answers |
-| `background` | The background flight check, notifications, mail scans, self-update |
-| `importer` | Reading flights out of documents, byAir exports and email |
-| `ui` | Shared components, the maps, each screen, the home screen widget |
-| `debug` | The developer request log and reports |
-
 ---
 
 Copyright (C) 2026 Patrick Geneva. Licensed under the [GPL-3.0](LICENSE).
