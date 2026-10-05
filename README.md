@@ -1,6 +1,11 @@
 # Air
 
-A private flight tracker and travel passport for Android. Track your own flights and friends' live, see your travel
+A private flight tracker and travel passport for Android.
+
+> **Disclaimer:** this entire app is vibe coded and was built for a single user, me. Use it at your own risk and
+> verify the code yourself.
+
+Track your own flights and friends' live, see your travel
 history on a map, and import confirmations by just sharing them to the app. Everything stays on the phone.
 
 <!-- screenshots:start -->
