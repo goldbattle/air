@@ -19,7 +19,16 @@ Copy it to the clipboard as base64:
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\air-release.jks")) | Set-Clipboard
 ```
 
-On macOS/Linux: `keytool ...` with the same arguments, then `base64 -w0 air-release.jks` (macOS: `base64 -i air-release.jks`).
+On Arch Linux:
+
+```sh
+sudo pacman -S --needed jre-openjdk-headless
+keytool -genkeypair -v -keystore ~/air-release.jks -alias air -keyalg RSA -keysize 4096 -validity 36500
+base64 -w0 ~/air-release.jks > ~/air-release.b64   # paste this file's contents as SIGNING_KEY
+```
+
+This is done once, on any computer; it doesn't have to be the one you develop on. Back up the `.jks` file and its
+password together (a password manager works), then delete the `.b64` copy.
 
 ## One-time: add the repository secrets
 
