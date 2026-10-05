@@ -27,8 +27,20 @@ keytool -genkeypair -v -keystore ~/air-release.jks -alias air -keyalg RSA -keysi
 base64 -w0 ~/air-release.jks > ~/air-release.b64   # paste this file's contents as SIGNING_KEY
 ```
 
-This is done once, on any computer; it doesn't have to be the one you develop on. Back up the `.jks` file and its
-password together (a password manager works), then delete the `.b64` copy.
+This is done once, on any computer; it doesn't have to be the one you develop on.
+
+## Safekeeping
+
+The keystore is binary, but its base64 text is a complete copy. Store these three entries in a password manager:
+
+| Entry | Example |
+|---|---|
+| Keystore (base64) | the one-line `SIGNING_KEY` text |
+| Password | the keystore password (and the key password, if you set a different one) |
+| Alias | `air` |
+
+Then delete the `.jks` and `.b64` files. To get the keystore back: `base64 -d air-release.b64 > air-release.jks`
+(PowerShell: `[IO.File]::WriteAllBytes("air-release.jks", [Convert]::FromBase64String((Get-Content air-release.b64)))`).
 
 ## One-time: add the repository secrets
 
