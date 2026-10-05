@@ -31,16 +31,16 @@ This is done once, on any computer; it doesn't have to be the one you develop on
 
 ## Safekeeping
 
-The keystore is binary, but its base64 text is a complete copy. Store these three entries in a password manager:
+Copy these into your password manager; they are everything needed to sign future releases:
 
-| Entry | Example |
+| Entry | Value |
 |---|---|
-| Keystore (base64) | the one-line `SIGNING_KEY` text |
-| Password | the keystore password (and the key password, if you set a different one) |
-| Alias | `air` |
+| `SIGNING_KEY` | the full contents of `air-release.b64` (one line of text) |
+| `KEY_STORE_PASSWORD` | the keystore password |
+| `KEY_ALIAS` | `air` |
+| `KEY_PASSWORD` | the key password (same as the keystore password unless you set a different one) |
 
-Then delete the `.jks` and `.b64` files. To get the keystore back: `base64 -d air-release.b64 > air-release.jks`
-(PowerShell: `[IO.File]::WriteAllBytes("air-release.jks", [Convert]::FromBase64String((Get-Content air-release.b64)))`).
+They are the same four values as the GitHub secrets below, so you can paste straight from the password manager.
 
 ## One-time: add the repository secrets
 
