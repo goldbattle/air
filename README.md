@@ -26,7 +26,7 @@ history on a map, and import confirmations by just sharing them to the app. Ever
 
 Download the latest APK from [Releases](https://github.com/goldbattle/air/releases) and sideload it. Air checks
 GitHub for new releases itself (Settings > About > Check for updates, with an optional daily background check) and
-installs them in place.
+installs them in place. To publish releases from a fork, see [.github/RELEASING.md](.github/RELEASING.md).
 
 ## Data sources
 
