@@ -18,7 +18,7 @@ class IndoorMapTest : AirTest() {
     @After
     fun restore() {
         Http.transport = { _, _ -> error("no network in tests") }
-        IndoorMaps.maps.clear(); IndoorMaps.errors.clear()
+        IndoorMaps.maps.clear(); IndoorMaps.errors.clear(); IndoorMaps.bundled = { null }
     }
 
     private fun way(vararg p: Pair<Double, Double>) = p.joinToString(",", "[", "]") { """{"lat":${it.first},"lon":${it.second}}""" }
@@ -125,18 +125,60 @@ class IndoorMapTest : AirTest() {
     }
 
     @Test
-    fun busyServerFallsBackToMirror() = runBlocking {
+    fun busyServersAreSkipped() = runBlocking {
         val hosts = mutableListOf<String>()
+        // A 504, then a 200 that's really an error, then the answer.
         Http.transport = { url, _ ->
             hosts += java.net.URI(url).host
-            if (hosts.size == 1) throw HttpError(504, "HTTP 504") else overpass
+            when (hosts.size) {
+                1 -> throw HttpError(504, "HTTP 504")
+                2 -> """{"remark":"runtime error: Query timed out","elements":[]}"""
+                else -> overpass
+            }
         }
         assertNotNull(IndoorMaps.get("SFO"))
-        assertEquals(listOf("overpass-api.de", "overpass.private.coffee"), hosts)
-        // Both down: the error is kept to show, and nothing breaks.
-        IndoorMaps.maps.clear()
-        Http.transport = { _, _ -> throw java.io.IOException("No route to host") }
+        assertEquals(listOf("overpass-api.de", "overpass.private.coffee", "overpass.kumi.systems"), hosts)
+        // All down: the error is kept to show, and nothing breaks.
+        Http.transport = { _, _ -> throw HttpError(500, "HTTP 500") }
         assertNull(IndoorMaps.get("BWI"))
-        assertEquals("No route to host", IndoorMaps.errors["BWI"])
+        assertEquals("OpenStreetMap's servers are busy", IndoorMaps.errors["BWI"])
+        // No answer at all is being offline, not busy.
+        IndoorMaps.errors.clear()
+        Http.transport = { _, _ -> throw java.io.IOException("Unable to resolve host") }
+        assertNull(IndoorMaps.get("BWI"))
+        assertEquals("No connection", IndoorMaps.errors["BWI"])
+        // An HTML error page with a 200 counts as busy too.
+        IndoorMaps.errors.clear()
+        Http.transport = { _, _ -> "<html>too busy</html>" }
+        assertNull(IndoorMaps.get("BWI"))
+        assertEquals("OpenStreetMap's servers are busy", IndoorMaps.errors["BWI"])
+    }
+
+    @Test
+    fun bundledMapsNeedNoDownload() = runBlocking {
+        val generated = NOW.minus(java.time.Duration.ofDays(10))
+        IndoorMaps.bundled = { code -> if (code == "SFO") overpass.replaceFirst("{", """{"generated":${generated.epochSecond},""") else null }
+        Http.transport = { _, _ -> error("a bundled map shouldn't be downloaded") }
+        val m = IndoorMaps.get("SFO")!!
+        assertEquals(generated, m.at); assertEquals(6, m.features.size)
+        // Over a month old: refreshed once; a failure keeps the bundled map, quietly, and isn't retried right away.
+        clock = java.time.Clock.offset(clock, java.time.Duration.ofDays(30))
+        IndoorMaps.maps.clear()
+        var asked = 0
+        Http.transport = { _, _ -> asked++; throw HttpError(503, "HTTP 503") }
+        assertEquals(generated, IndoorMaps.get("SFO")?.at)
+        val first = asked
+        assertTrue(first > 0)
+        IndoorMaps.get("SFO"); assertEquals(first, asked)
+    }
+
+    /** tools/airport_maps.py makes the bundled maps with the app's own query; keep them in step. */
+    @Test
+    fun bundlingScriptAsksTheSameQuery() {
+        val script = java.io.File("../tools/airport_maps.py").readText()
+        Overpass.wanted("{a}").lines().map { it.trim() }.filter { it.isNotEmpty() }.forEach {
+            assertTrue("airport_maps.py is missing: $it", it in script)
+        }
+        Overpass.servers.forEach { assertTrue(it in script) }
     }
 }

@@ -120,7 +120,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            if (!WindowInsets.isImeVisibleCompat()) TabBar()
+            // The terminal map is full screen; everywhere else keeps the tabs (unless typing).
+            if (!WindowInsets.isImeVisibleCompat() && Nav.stack.lastOrNull() !is Screen.AirportMap) TabBar()
         }
     }
 }

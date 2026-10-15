@@ -1,6 +1,6 @@
 package com.aria.air.sync
 
-// Saved airport indoor maps: downloaded once, kept for a month, and fetched ahead for upcoming flights.
+// Airport indoor maps: bundled for the big US airports, downloaded and saved for the rest, refreshed monthly.
 
 import com.aria.air.api.*
 import com.aria.air.data.*
@@ -16,12 +16,16 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Indoor maps by airport code, saved in filesDir/indoor so they open offline (at the gate, or in the air on the way
- * there). Maps change slowly, so a saved one is refreshed only once it's a month old.
+ * Indoor maps by airport code. The big US airports ship with the app (assets/airport-maps, made by
+ * tools/airport_maps.py); others are downloaded from OpenStreetMap the first time and saved in filesDir/indoor, so
+ * every map opens offline once you have it. A map over a month old is refreshed quietly; if that fails it's kept.
  */
 object IndoorMaps {
     private var dir: File? = null // null in unit tests: memory only
     private val lock = Mutex()
+
+    /** A bundled map's Overpass JSON by airport code, null when none ships with the app. Tests swap it. */
+    internal var bundled: (String) -> String? = { null }
 
     /** Maps loaded so far, as Compose state so an open map redraws when its download finishes. */
     val maps = mutableStateMapOf<String, IndoorMap>()
@@ -32,30 +36,50 @@ object IndoorMaps {
     /** The last download error per airport, in words. */
     val errors = mutableStateMapOf<String, String>()
 
+    /** When each airport's download was last tried, so a busy server isn't asked again on every opening. */
+    private val tried = mutableMapOf<String, Instant>()
+
     /** How long a saved map is used before it's downloaded again. */
     val MAX_AGE: Duration = Duration.ofDays(30)
 
-    fun init(ctx: android.content.Context) { dir = File(ctx.filesDir, "indoor").apply { mkdirs() } }
+    /** How soon a failed refresh of a map we already have is tried again. */
+    private val RETRY: Duration = Duration.ofHours(6)
+
+    fun init(ctx: android.content.Context) {
+        dir = File(ctx.filesDir, "indoor").apply { mkdirs() }
+        val assets = ctx.assets
+        // Kept gzipped in the repo; the Android build unzips .gz assets and drops the extension (the APK is compressed).
+        bundled = { code -> runCatching { assets.open("airport-maps/${code.uppercase()}.json").bufferedReader().use { it.readText() } }.getOrNull() }
+    }
 
     private fun file(code: String) = dir?.let { File(it, "${code.uppercase()}.json") }
 
-    /** The saved map for [code], from memory or disk; null when there's none yet. */
-    fun saved(code: String): IndoorMap? = maps[code] ?: file(code)?.takeIf { it.exists() }
-        ?.let { runCatching { IndoorMap.fromJson(JSONObject(it.readText())) }.getOrNull() }
-        ?.also { maps[code] = it }
+    /** The map for [code] already on the phone (downloaded, else bundled), or null when there's none yet. */
+    fun saved(code: String): IndoorMap? = maps[code]
+        ?: file(code)?.takeIf { it.exists() }?.let { runCatching { IndoorMap.fromJson(JSONObject(it.readText())) }.getOrNull() }
+            ?.also { maps[code] = it }
+        ?: bundled(code)?.let { json ->
+            runCatching {
+                IndoorMap.fromOverpass(code, json, Instant.ofEpochSecond(JSONObject(json).optLong("generated")))
+            }.getOrNull()
+        }?.also { maps[code] = it }
 
     /**
-     * The map for [code]: the saved one, downloaded first when there's none, it's over a month old, or [force]. A failed
-     * download keeps the saved map and records the error.
+     * The map for [code]: the one on the phone, downloaded first when there's none, it's over a month old, or [force].
+     * A failed download keeps what we have; the error is recorded for the screen only when there's nothing to show.
      */
     suspend fun get(code: String, force: Boolean = false): IndoorMap? = withContext(Dispatchers.IO) {
         val have = saved(code)
-        if (have != null && !force && Duration.between(have.at, Instant.now(clock)) < MAX_AGE) return@withContext have
+        val now = Instant.now(clock)
+        val stale = have == null || Duration.between(have.at, now) >= MAX_AGE
+        val recentlyTried = tried[code]?.let { Duration.between(it, now) < RETRY } == true
+        if (!force && (!stale || (have != null && recentlyTried))) return@withContext have
         val a = Db.airport(code) ?: return@withContext have
         lock.withLock {
             busy[code] = true
+            tried[code] = now
             try {
-                val m = Overpass.indoorMap(a, Instant.now(clock))
+                val m = Overpass.indoorMap(a, now)
                 file(code)?.writeText(m.toJson().toString())
                 maps[code] = m
                 errors.remove(code)
@@ -70,8 +94,8 @@ object IndoorMaps {
     }
 
     /** Downloads both airports' maps ahead of an upcoming flight, so they're there offline. */
-    suspend fun prefetch(f: Flight) {
-        if (f.phase() == Phase.Done) return
+    suspend fun prefetch(f: Flight) = withContext(Dispatchers.IO) {
+        if (f.phase() == Phase.Done) return@withContext
         for (c in listOf(f.from, f.to)) if (saved(c) == null) get(c)
     }
 }

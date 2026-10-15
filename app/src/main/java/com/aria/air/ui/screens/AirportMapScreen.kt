@@ -25,11 +25,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.delay
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -81,7 +87,13 @@ private fun levelName(l: Double) = if (l % 1.0 == 0.0) l.toInt().toString() else
 fun AirportMapScreen(code: String, gate: String) {
     val ctx = LocalContext.current
     val a = Db.airport(code)
-    LaunchedEffect(code) { IndoorMaps.get(code) }
+    // Busy servers are retried a few times while the screen is open; once saved, the map opens instantly offline.
+    LaunchedEffect(code) {
+        repeat(4) {
+            if (IndoorMaps.get(code) != null) return@LaunchedEffect
+            delay(20_000)
+        }
+    }
     val map = IndoorMaps.maps[code]
     val busy = IndoorMaps.busy[code] == true
     var level by remember(map) { mutableStateOf(map?.mainLevel) }
@@ -124,69 +136,94 @@ fun AirportMapScreen(code: String, gate: String) {
                         }
                     },
             )
-            if (map.levels.size > 1) LevelPicker(map.levels, level, Modifier.align(Alignment.CenterEnd).padding(end = 12.dp)) { level = it; picked = null }
-        } else {
-            Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                when {
-                    busy || (map == null && IndoorMaps.errors[code] == null) -> {
-                        CircularProgressIndicator(color = C.secondary)
-                        Text("Downloading the $code map from OpenStreetMap…", color = C.secondary, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp))
-                    }
-                    else -> Text("Couldn't get the map: ${IndoorMaps.errors[code]}", color = C.secondary, fontSize = 15.sp)
-                }
-            }
-        }
-        if (map != null && map.features.none { it.kind >= Place.ROOM }) {
-            Text(
-                "OpenStreetMap has no indoor detail for $code yet; only the terminal outlines.",
-                color = C.secondary, fontSize = 13.sp,
-                modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(10.dp)).background(C.card.copy(alpha = 0.9f)).padding(12.dp),
+            if (map.levels.size > 1) LevelPicker(
+                map.levels, level, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 68.dp, end = 12.dp),
+            ) { level = it; picked = null }
+            if (map.features.none { it.kind >= Place.ROOM }) Notice(
+                Icons.Filled.Map, "Only the outlines so far",
+                "OpenStreetMap volunteers haven't mapped the inside of $code yet.", Modifier.align(Alignment.Center),
             )
+        } else if (busy || IndoorMaps.errors[code] == null) {
+            Notice(null, "Getting the $code map", "From OpenStreetMap, once; then it opens offline.", Modifier.align(Alignment.Center))
+        } else {
+            Notice(
+                Icons.Filled.CloudOff, "Couldn't get the map",
+                if (IndoorMaps.errors[code]?.contains("busy") == true) "OpenStreetMap's servers are busy. Try again in a minute."
+                else "No connection. Once downloaded, the map works offline.",
+                Modifier.align(Alignment.Center), action = "Try again",
+            ) { App.scope.launch { IndoorMaps.get(code, force = true) } }
         }
 
-        // Top: back, the title, re-download and open in another maps app.
+        // Top: back, which airport and floor (and your gate), and open in another maps app.
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             MapButton(Icons.Filled.ChevronLeft, "Back") { Nav.pop() }
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(C.card.copy(alpha = 0.92f)).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                Text("$code terminal map", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = C.label, maxLines = 1)
+            Box(Modifier.weight(1f)) { Column(
+                Modifier.shadow(3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
+                    .background(C.card).padding(horizontal = 14.dp, vertical = 7.dp),
+            ) {
+                Text(a?.name ?: code, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val sub = listOfNotNull(
+                    code,
                     level?.takeIf { (map?.levels?.size ?: 0) > 1 }?.let { "Level ${levelName(it)}" },
                     gate.takeIf { it.isNotEmpty() }?.let {
                         when {
                             exact != null -> "Gate $it"
-                            target != null -> "$it not mapped · showing ${target.ref}"
-                            else -> "Gate $it isn't mapped"
+                            target != null -> "Gate $it not mapped, near ${target.ref}"
+                            else -> "Gate $it not mapped"
                         }
                     },
                 ).joinToString(" · ")
-                if (sub.isNotEmpty()) Text(sub, fontSize = 13.sp, color = C.secondary, maxLines = 1)
-            }
-            Spacer(Modifier.width(10.dp))
-            if (busy && map != null) Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = C.secondary)
-            } else MapButton(Icons.Filled.Refresh, "Download the map again") { App.scope.launch { IndoorMaps.get(code, force = true) } }
+                Text(sub, fontSize = 12.sp, color = C.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } }
             Spacer(Modifier.width(10.dp))
             MapButton(Icons.AutoMirrored.Filled.OpenInNew, "Open in a maps app") {
                 val p = picked?.at ?: target?.at ?: a?.let { Pt(it.lat, it.lon) } ?: return@MapButton
-                val label = picked?.let { it.name.ifEmpty { it.kind.label } } ?: target?.let { "Gate $gate" } ?: code
+                val label = picked?.let { it.name.ifEmpty { it.kind.label } } ?: target?.let { "Gate ${it.ref}" } ?: code
                 runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "geo:0,0?q=${p.lat},${p.lon}(${Uri.encode(label)})".toUri())) }
             }
         }
 
-        // Bottom: what you tapped, the filters, and the credit OpenStreetMap's license asks for.
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding().padding(12.dp)) {
-            picked?.let { PickedCard(it, target?.takeIf { t -> t != it }) { picked = null } }
+        // Bottom: what you tapped, the filters, then the credit OpenStreetMap's license asks for, with a refresh.
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
+            picked?.let { PickedCard(it, target?.takeIf { t -> t != it }, Modifier.padding(horizontal = 12.dp)) { picked = null } }
             if (map != null) Filters(map, level, filter) { filter = if (filter == it) null else it; picked = null }
-            Text(
-                "© OpenStreetMap contributors" + (map?.let { " · updated ${ago(it.at)}" } ?: ""),
-                fontSize = 11.sp, color = C.secondary,
-                modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(8.dp)).background(C.card.copy(alpha = 0.85f))
-                    .clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://www.openstreetmap.org/copyright".toUri())) } }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            )
+            Row(Modifier.padding(start = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "© OpenStreetMap", fontSize = 11.sp, color = C.secondary,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(C.card.copy(alpha = 0.8f))
+                        .clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://www.openstreetmap.org/copyright".toUri())) } }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+                if (map != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (busy) "Updating…" else "Updated ${ago(map.at)} · Refresh", fontSize = 11.sp, color = if (busy) C.secondary else C.blue,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(C.card.copy(alpha = 0.8f))
+                            .clickable(enabled = !busy) { App.scope.launch { IndoorMaps.get(code, force = true) } }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
         }
     }
+}
+
+/** A centered card for loading, errors and empty maps: an icon (a spinner when null), a title, a line, and a button. */
+@Composable
+private fun Notice(
+    icon: androidx.compose.ui.graphics.vector.ImageVector?, title: String, text: String, modifier: Modifier,
+    action: String? = null, onAction: () -> Unit = {},
+) = Column(
+    modifier.padding(32.dp).widthIn(max = 320.dp).shadow(4.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
+        .background(C.card).padding(20.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+) {
+    if (icon == null) CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 3.dp, color = C.blue)
+    else Icon(icon, null, tint = C.secondary, modifier = Modifier.size(36.dp))
+    Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = C.label, modifier = Modifier.padding(top = 12.dp))
+    Text(text, fontSize = 14.sp, color = C.secondary, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+    if (action != null) Button(action, Modifier.padding(top = 16.dp).fillMaxWidth(), onClick = onAction)
 }
 
 /** The view that shows all the terminals (or everything mapped, when no terminal is). */
@@ -224,7 +261,7 @@ private fun IndoorCanvas(map: IndoorMap, proj: Proj, v: View, level: Double?, fi
     val pois = remember(visible) { visible.filter { !it.kind.area && it.kind != Place.GATE } }
     val gates = remember(map) { map.features.filter { it.kind == Place.GATE } }
     val colors = PlaceColors()
-    Canvas(Modifier.fillMaxSize()) {
+    Canvas(Modifier.fillMaxSize().background(colors.ground)) {
         val s = v.scale.toFloat()
         val dx = (size.width / 2 - v.x * v.scale).toFloat(); val dy = (size.height / 2 - v.y * v.scale).toFloat()
         fun sx(f: Feature) = (dx + proj.x(f.at) * s).toFloat()
@@ -256,10 +293,10 @@ private fun IndoorCanvas(map: IndoorMap, proj: Proj, v: View, level: Double?, fi
             // Zoomed out, only the places people look for; elevators, stairs and the like join once zoomed in.
             val minor = setOf(Place.ELEVATOR, Place.STAIRS, Place.MONEY, Place.INFO, Place.CHARGING, Place.WATER)
             val shown = pois.filter { if (filter != null) it.kind == filter else zoomedIn || it.kind !in minor }
-                .sortedBy { if (it.name.isEmpty()) 1 else 0 }
-            val r = (if (filter != null) 13 else 11).dp.toPx()
+                .sortedBy { (if (it.kind in minor) 2 else 0) + (if (it.name.isEmpty()) 1 else 0) } // food and shops win space
             for (f in shown) {
                 val x = sx(f); val y = sy(f)
+                val r = (if (filter != null) 13 else if (f.kind in minor) 8 else 11).dp.toPx()
                 if (!onScreen(x, y) || !free(android.graphics.RectF(x - r, y - r, x + r, y + r))) continue
                 paint.color = if (f == picked) colors.blue else colors.chip
                 c.drawCircle(x, y, r, paint)
@@ -269,7 +306,13 @@ private fun IndoorCanvas(map: IndoorMap, proj: Proj, v: View, level: Double?, fi
                     paint.textSize = 11.dp.toPx(); paint.typeface = Typeface.DEFAULT
                     val w = paint.measureText(f.name) / 2
                     val box = android.graphics.RectF(x - w, y + r, x + w, y + r + paint.textSize * 1.3f)
-                    if (free(box)) { paint.color = colors.ink; c.drawText(f.name, x, y + r + paint.textSize, paint) }
+                    if (free(box)) {
+                        // A halo in the ground color keeps names readable over walls and rooms.
+                        paint.style = Paint.Style.STROKE; paint.strokeWidth = 3.dp.toPx(); paint.color = colors.halo
+                        c.drawText(f.name, x, y + r + paint.textSize, paint)
+                        paint.style = Paint.Style.FILL; paint.color = colors.ink
+                        c.drawText(f.name, x, y + r + paint.textSize, paint)
+                    }
                 }
             }
             if (zoomedIn && filter == null) {
@@ -297,10 +340,13 @@ private class PlaceColors {
     val chip = C.card.toArgb()
     val ink = C.label.toArgb()
     val gate = C.secondary.copy(alpha = 0.85f).toArgb()
-    private val apron = C.land.copy(alpha = 0.7f)
-    private val terminal = C.card
-    private val area = C.blue.copy(alpha = 0.06f)
-    private val room = C.land
+    /** Behind everything (and the halo around labels): darker than the terminals in both modes. */
+    val ground = if (C.dark) Color(0xFF0E0E10) else C.sea
+    val halo = ground.toArgb()
+    private val apron = if (C.dark) Color(0xFF1A1A1D) else C.fill
+    private val terminal = if (C.dark) Color(0xFF2C2C2E) else C.card
+    private val area = if (C.dark) Color(0xFF35353A) else C.blue.copy(alpha = 0.06f)
+    private val room = if (C.dark) Color(0xFF45454B) else C.land
     private val food = C.orange.copy(alpha = 0.28f)
     private val shop = C.indigo.copy(alpha = 0.22f)
     private val rest = C.blue.copy(alpha = 0.22f)
@@ -322,15 +368,15 @@ private class PlaceColors {
 /** The floor buttons down the right side, top floor first. */
 @Composable
 private fun LevelPicker(levels: List<Double>, level: Double?, modifier: Modifier, onPick: (Double) -> Unit) = Column(
-    modifier.clip(RoundedCornerShape(20.dp)).background(C.card.copy(alpha = 0.92f)).padding(4.dp),
-    verticalArrangement = Arrangement.spacedBy(2.dp),
+    modifier.shadow(3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).background(C.card).padding(3.dp),
+    verticalArrangement = Arrangement.spacedBy(1.dp),
 ) {
     levels.reversed().forEach { l ->
         val on = l == level
         Box(
-            Modifier.size(36.dp).clip(CircleShape).background(if (on) C.blue else Color.Transparent).clickable { onPick(l) },
+            Modifier.size(34.dp).clip(CircleShape).background(if (on) C.blue else Color.Transparent).clickable { onPick(l) },
             contentAlignment = Alignment.Center,
-        ) { Text(levelName(l), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (on) Color.White else C.label) }
+        ) { Text(levelName(l), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (on) Color.White else C.label) }
     }
 }
 
@@ -342,23 +388,32 @@ private fun Filters(map: IndoorMap, level: Double?, on: Place?, onPick: (Place) 
             .entries.sortedBy { it.key.ordinal }
     }
     if (counts.isEmpty()) return
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Spacer(Modifier.width(6.dp))
         counts.forEach { (k, n) ->
             val sel = k == on
-            Text(
-                "${k.icon} ${k.label} $n", fontSize = 13.sp, color = if (sel) Color.White else C.label,
-                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
-                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (sel) C.blue else C.card.copy(alpha = 0.92f))
+            Row(
+                Modifier.shadow(2.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(if (sel) C.blue else C.card)
                     .clickable { onPick(k) }.padding(horizontal = 10.dp, vertical = 6.dp),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(k.icon, fontSize = 13.sp)
+                Text(" ${k.label}", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (sel) Color.White else C.label)
+                Text(" $n", fontSize = 13.sp, color = if (sel) Color.White.copy(alpha = 0.8f) else C.secondary)
+            }
         }
+        Spacer(Modifier.width(6.dp))
     }
 }
 
 /** What you tapped: its name, kind, floors, opening hours, and how far it is from your gate ([from]). */
 @Composable
-private fun PickedCard(f: Feature, from: Feature?, onClose: () -> Unit) = Row(
-    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.card).clickable(onClick = onClose).padding(14.dp),
+private fun PickedCard(f: Feature, from: Feature?, modifier: Modifier, onClose: () -> Unit) = Row(
+    modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)).background(C.card)
+        .clickable(onClick = onClose).padding(14.dp),
     verticalAlignment = Alignment.CenterVertically,
 ) {
     if (f.kind.icon.isNotEmpty()) Text(f.kind.icon, fontSize = 26.sp, modifier = Modifier.padding(end = 12.dp))

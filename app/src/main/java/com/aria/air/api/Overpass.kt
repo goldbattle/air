@@ -11,11 +11,14 @@ import java.net.URLEncoder
  * © OpenStreetMap contributors, which the map credits.
  */
 object Overpass {
-    /** The public instance first, then a mirror when it's busy (it answers 429/504 under load). */
-    private val servers = listOf("https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter")
+    /** The public instance first, then mirrors; all are shared and often busy (429, 5xx, or an error inside a 200). */
+    internal val servers = listOf(
+        "https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    )
 
-    /** What the indoor map draws, inside [area]: an Overpass area set or an "around" filter. */
-    private fun wanted(area: String) = """
+    /** What the indoor map draws, inside [area]: an Overpass area set or an "around" filter. tools/airport_maps.py asks the same. */
+    internal fun wanted(area: String) = """
         (
           nwr["indoor"~"^(room|area|corridor|yes)$"]$area;
           nwr["aeroway"~"^(gate|terminal|apron|baggage_claim|baggage_reclaim|check-in)$"]$area;
@@ -46,19 +49,33 @@ object Overpass {
         else IndoorMap.fromOverpass(a.iata, run(byPlace(a)), now)
     }
 
-    /** Runs [query] on the first server that answers. */
+    /** Overpass's servers were all busy or down; worth trying again later. */
+    class Busy : java.io.IOException("OpenStreetMap's servers are busy")
+
+    /**
+     * Runs [query] on the first server that gives a real answer. A busy server can fail outright (429, 5xx, timeout)
+     * or answer 200 with an error page or a "runtime error" remark instead of data; both move on to the next server.
+     */
     private fun run(query: String): String {
-        var last: Exception? = null
+        var offline: java.io.IOException? = null // set while no server has answered at all
+        var answered = false
         for (s in servers) {
-            try {
-                return Http.get("$s?data=" + URLEncoder.encode(query, "UTF-8"))
+            val body = try {
+                Http.get("$s?data=" + URLEncoder.encode(query, "UTF-8"))
             } catch (e: HttpError) {
-                last = e
-                if (e.code !in setOf(429, 502, 503, 504)) throw e
+                answered = true
+                if (e.code == 429 || e.code >= 500) continue else throw e
             } catch (e: java.io.IOException) {
-                last = e
+                offline = e
+                continue
             }
+            answered = true
+            val ok = body.trimStart().startsWith("{") &&
+                runCatching { org.json.JSONObject(body).optString("remark") }.getOrNull()?.contains("error") == false
+            if (ok) return body
         }
-        throw last ?: java.io.IOException("No Overpass server answered")
+        // Nobody answered at all: the phone is offline (or the servers unreachable), not busy.
+        if (!answered && offline != null) throw java.io.IOException("No connection")
+        throw Busy()
     }
 }
