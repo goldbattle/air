@@ -87,6 +87,8 @@ fun FlightScreen(id: String) {
     // Past routes and route weather when their layers are on: on opening, and as soon as one is switched on.
     val routesOn = Layers.routes; val weatherOn = Layers.weather
     LaunchedEffect(id, routesOn) { Store.get(id)?.let { PastRoutes.update(it) } }
+    // Both airports' indoor maps ahead of time, so they open offline at the gate or after landing.
+    LaunchedEffect(id) { Store.get(id)?.let { IndoorMaps.prefetch(it) } }
     LaunchedEffect(id, weatherOn) {
         if (!weatherOn) return@LaunchedEffect
         Store.get(id)?.let { cur -> WeatherSync.refreshRoute(cur).routeWx?.let { w -> Store.get(id)?.let { Store.upsert(it.copy(routeWx = w)) } } }

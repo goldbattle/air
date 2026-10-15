@@ -176,6 +176,7 @@ fun Cell(
     iconTint: Color = C.blue,
     subtitle: String? = null,
     chevron: Boolean = false,
+    valueColor: Color = C.secondary,
     onClick: (() -> Unit)? = null,
 ) = Row(
     Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
@@ -192,7 +193,7 @@ fun Cell(
         if (subtitle != null) Text(subtitle, fontSize = 13.sp, color = C.secondary)
     }
     if (value != null) Text(
-        value, fontSize = 17.sp, color = C.secondary, textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        value, fontSize = 17.sp, color = valueColor, textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(start = 12.dp).weight(0.8f),
     )
     if (chevron) Icon(Icons.Filled.ChevronRight, null, tint = C.tertiary)

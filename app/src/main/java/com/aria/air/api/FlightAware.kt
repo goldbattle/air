@@ -132,4 +132,32 @@ object FlightAware {
             }
         }.getOrDefault(emptyList())
     }
+
+    /** The aircraft [reg]'s flights over the last week, newest first (one paid call; FlightAware keeps about ten days). */
+    fun tailLegs(reg: String, key: String): List<TailLeg> {
+        val now = Instant.now(clock).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+        return parseLegs(Http.get(
+            "https://aeroapi.flightaware.com/aeroapi/flights/${AeroDataBox.tailKey(reg)}?ident_type=registration" +
+                "&start=${now.minus(Duration.ofDays(6))}&end=${now.plus(Duration.ofDays(1))}",
+            mapOf("x-apikey" to key),
+        ))
+    }
+
+    /** FlightAware's flight list as [TailLeg]s, newest first. */
+    internal fun parseLegs(body: String): List<TailLeg> {
+        val arr = JSONObject(body).optJSONArray("flights") ?: return emptyList()
+        return (0 until arr.length()).map { arr.getJSONObject(it) }.map { j ->
+            fun t(vararg keys: String) = keys.firstNotNullOfOrNull { k ->
+                j.optString(k).takeIf { it.isNotEmpty() && it != "null" }?.let { runCatching { Instant.parse(it) }.getOrNull() }
+            }
+            fun iata(k: String) = j.optJSONObject(k)?.optString("code_iata")?.takeIf { it != "null" }.orEmpty()
+            TailLeg(
+                flight = j.optString("ident_iata").takeIf { it.isNotEmpty() && it != "null" } ?: j.optString("ident"),
+                from = iata("origin"), to = iata("destination"),
+                depSched = t("scheduled_out", "scheduled_off"), depActual = t("actual_out", "actual_off"),
+                arrSched = t("scheduled_in", "scheduled_on"), arrActual = t("actual_in", "actual_on"),
+                cancelled = j.optBoolean("cancelled"),
+            )
+        }.sortedByDescending { it.depSched }
+    }
 }

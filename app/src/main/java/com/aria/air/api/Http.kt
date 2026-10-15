@@ -32,12 +32,12 @@ object Http {
         return r.getOrThrow()
     }
 
-    /** The real network call behind [transport]: 10 s to connect, 15 s to read, with Air's User-Agent. */
+    /** The real network call behind [transport]: 10 s to connect, 15 s to read (90 s for Overpass), with Air's User-Agent. */
     private fun fetch(url: String, headers: Map<String, String>): String {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.connectTimeout = 10_000
-            c.readTimeout = 15_000
+            c.readTimeout = if ("overpass" in url) 90_000 else 15_000 // a big airport's indoor map takes a while to gather
             c.setRequestProperty("User-Agent", "Air-Android/${BuildConfig.VERSION_NAME}")
             headers.forEach(c::setRequestProperty)
             val code = c.responseCode

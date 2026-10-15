@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AirplanemodeActive
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.LocalAirport
 import androidx.compose.material3.Text
@@ -71,6 +72,7 @@ fun PassportScreen() {
                 }
             }
         }
+        item("review") { Review(s, list, mine, year) }
         item("airports") {
             SectionHeader("Top airports")
             Group {
@@ -106,6 +108,15 @@ fun PassportScreen() {
                 }
             }
         }
+        if (s.aircraft.isNotEmpty()) item("aircraft") {
+            SectionHeader("Aircraft")
+            Group {
+                s.aircraft.entries.sortedByDescending { it.value }.take(5).forEachIndexed { i, (type, n) ->
+                    if (i > 0) Hairline(50.dp)
+                    Cell(type, value = "$n×", icon = Icons.Filled.AirplanemodeActive)
+                }
+            }
+        }
         item("countries") {
             SectionHeader("Countries")
             Group {
@@ -114,6 +125,42 @@ fun PassportScreen() {
                     Cell("${flag(iso)}  ${countryName(iso)}")
                 }
             }
+        }
+    }
+}
+
+/**
+ * The year in review (or all-time highlights): estimated CO₂, punctuality, and for a year its busiest month, airports
+ * visited for the first time and how it compares with the year before.
+ */
+@Composable
+private fun Review(s: Stats, list: List<Flight>, all: List<Flight>, year: Int?) {
+    val rows = buildList<Triple<String, String, String?>> {
+        val t = s.co2Kg / 1000
+        add(Triple("CO₂ (estimate)", if (t >= 1) "≈ %.1f t".format(t) else "≈ ${(s.co2Kg / 10).roundToInt() * 10} kg", "Rough, per economy seat"))
+        s.averageDelay?.let { avg ->
+            add(Triple("On time", "${s.onTime * 100 / s.timed}%", "${s.onTime} of ${s.timed} landed within 15 min" + if (avg > 0) " · avg ${span(java.time.Duration.ofMinutes(avg))} late" else ""))
+        }
+        s.aircraft.maxByOrNull { it.value }?.let { (type, n) -> add(Triple("Most flown aircraft", type, "$n flights")) }
+        if (year != null) {
+            s.months.maxByOrNull { it.value }?.takeIf { it.value > 1 }?.let { (m, n) ->
+                add(Triple("Busiest month", m.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault()), "$n flights"))
+            }
+            firstVisits(list, all.filter { it.date.year < year }).takeIf { it.isNotEmpty() }?.let { new ->
+                add(Triple("New airports", "${new.size}", new.take(8).joinToString(", ") + if (new.size > 8) "…" else ""))
+            }
+            all.filter { it.date.year == year - 1 }.takeIf { it.isNotEmpty() }?.let { prev ->
+                val df = s.flights - prev.size
+                val dm = ((s.km - prev.sumOf { it.distanceKm }) / KM_PER_MI).roundToInt()
+                add(Triple("vs. ${year - 1}", "${if (df >= 0) "+" else ""}$df flight${if (kotlin.math.abs(df) == 1) "" else "s"}", "${if (dm >= 0) "+" else "−"}${fmtInt(kotlin.math.abs(dm))} mi"))
+            }
+        }
+    }
+    SectionHeader(if (year != null) "$year in review" else "Highlights")
+    Group {
+        rows.forEachIndexed { i, (title, value, sub) ->
+            if (i > 0) Hairline()
+            Cell(title, value, subtitle = sub)
         }
     }
 }

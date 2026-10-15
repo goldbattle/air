@@ -107,4 +107,57 @@ object AeroDataBox {
         "https://aerodatabox.p.rapidapi.com/flights/number/${f.airline}${f.number}/$day?withAircraftImage=false&withLocation=false&dateLocalRole=Departure",
         headers(key),
     )
+
+    /** The airframe behind tail number [reg]: model, age, seats, engines (one TIER 1 call). Null when unknown. */
+    fun aircraft(reg: String, key: String): TailInfo? = try {
+        Http.get("https://aerodatabox.p.rapidapi.com/aircrafts/reg/${tailKey(reg)}", headers(key))
+            .takeIf { it.isNotBlank() }?.let { parseAircraft(JSONObject(it)) }
+    } catch (e: HttpError) {
+        if (e.code == 404) null else throw e
+    }
+
+    /** [reg] as AeroDataBox looks it up: no spaces or dashes ("N-12345" -> "N12345"). */
+    internal fun tailKey(reg: String) = reg.uppercase().replace(Regex("[^A-Z0-9]"), "")
+
+    /** An aircraft record (AircraftContract) as [TailInfo]. */
+    internal fun parseAircraft(j: JSONObject): TailInfo {
+        fun s(k: String) = j.optString(k).takeIf { it != "null" }.orEmpty()
+        fun d(k: String) = s(k).take(10).takeIf { it.length == 10 }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val engines = listOf(j.optInt("numEngines").takeIf { it > 0 }?.toString().orEmpty(), s("engineType"))
+            .filter { it.isNotEmpty() }.joinToString(" × ")
+        return TailInfo(
+            model = s("typeName").ifEmpty { s("model") }, type = s("modelCode").ifEmpty { s("model") }, airline = s("airlineName"),
+            ageYears = j.optDouble("ageYears").takeIf { !it.isNaN() }, delivered = d("deliveryDate"), firstFlight = d("firstFlightDate"),
+            seats = j.optInt("numSeats").takeIf { it > 0 }, engines = engines, hex = s("hexIcao").lowercase(), serial = s("serial"),
+        )
+    }
+
+    /** The aircraft's flights between [from] and [to] (local dates, one TIER 3 call), newest first. */
+    fun tailLegs(reg: String, from: LocalDate, to: LocalDate, key: String): List<TailLeg> = parseLegs(
+        Http.get(
+            "https://aerodatabox.p.rapidapi.com/flights/reg/${tailKey(reg)}/$from/$to?withAircraftImage=false&withLocation=false&dateLocalRole=Departure",
+            headers(key),
+        ),
+    )
+
+    /** AeroDataBox's flight list as [TailLeg]s: actual times only once it has left or landed, newest first. */
+    internal fun parseLegs(body: String): List<TailLeg> {
+        if (body.isBlank()) return emptyList()
+        val a = org.json.JSONArray(body)
+        return (0 until a.length()).map { a.getJSONObject(it) }.map { leg ->
+            val dep = leg.optJSONObject("departure") ?: JSONObject()
+            val arr = leg.optJSONObject("arrival") ?: JSONObject()
+            fun t(side: JSONObject, k: String) = side.optJSONObject(k)?.optString("utc")?.takeIf { it.isNotEmpty() }
+                ?.let { runCatching { java.time.OffsetDateTime.parse(it, adbTime).toInstant() }.getOrNull() }
+            val status = leg.optString("status")
+            val departed = status in setOf("Departed", "EnRoute", "Approaching", "Arrived", "Diverted")
+            TailLeg(
+                flight = leg.optString("number").replace(" ", ""),
+                from = dep.optJSONObject("airport")?.optString("iata").orEmpty(), to = arr.optJSONObject("airport")?.optString("iata").orEmpty(),
+                depSched = t(dep, "scheduledTime"), depActual = if (departed) t(dep, "runwayTime") ?: t(dep, "revisedTime") else null,
+                arrSched = t(arr, "scheduledTime"), arrActual = if (status == "Arrived") t(arr, "revisedTime") ?: t(arr, "runwayTime") else null,
+                cancelled = status.startsWith("Cancel"),
+            )
+        }.sortedByDescending { it.depSched }
+    }
 }

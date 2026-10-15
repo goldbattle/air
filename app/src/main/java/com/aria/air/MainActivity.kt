@@ -113,6 +113,8 @@ class MainActivity : ComponentActivity() {
                         is Screen.Add -> AddScreen(s)
                         is Screen.AirportInfo -> AirportScreen(s.code)
                         is Screen.AirlineInfo -> AirlineScreen(s.code)
+                        is Screen.AirportMap -> AirportMapScreen(s.code, s.gate)
+                        is Screen.Aircraft -> AircraftScreen(s.reg, s.model)
                         Screen.MailAccounts -> MailScreen()
                         Screen.MailFound -> MailFoundScreen()
                     }

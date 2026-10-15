@@ -29,6 +29,8 @@ class App : Application() {
         RainViewer.init(this)
         NasaGibs.init(this)
         PastRoutes.init(this)
+        IndoorMaps.init(this)
+        Tails.init(this)
         Mail.init(this)
         Debug.init(this)
         Store.onChange = { scope.launch { FlightWidget.refresh(this@App) } }

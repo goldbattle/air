@@ -14,6 +14,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
@@ -144,6 +146,8 @@ internal fun DeparturePanel(f: Flight, now: Instant) {
     WeatherCell(f.depWx, "takeoff", f.origin?.city ?: f.from)
     Hairline()
     AirportCell(f.from, "Local time ${localNow(f.fromTz)}")
+    Hairline(50.dp)
+    MapCell(f.from, f.depGate)
     if (!Prefs.hasStatusKey && f.depGate.isEmpty()) {
         Hairline()
         Text(
@@ -240,6 +244,8 @@ internal fun ArrivalPanel(f: Flight, now: Instant) {
     WeatherCell(f.arrWx, "landing", f.dest?.city ?: f.to)
     Hairline()
     AirportCell(f.to, "Local time ${localNow(f.toTz)}")
+    Hairline(50.dp)
+    MapCell(f.to, f.arrGate)
     TimezoneCell(f)
 }
 
@@ -272,6 +278,13 @@ private fun AirportCell(code: String, subtitle: String) {
         icon = Icons.Filled.LocalAirport, chevron = true,
     ) { Nav.push(Screen.AirportInfo(code)) }
 }
+
+/** A row opening the airport's indoor map on [gate]. */
+@Composable
+private fun MapCell(code: String, gate: String) = Cell(
+    "Terminal map", subtitle = if (gate.isNotEmpty()) "Gate $gate, food, restrooms and shops" else "Gates, food, restrooms and shops",
+    icon = Icons.Filled.Map, chevron = true,
+) { Nav.push(Screen.AirportMap(code, gate)) }
 
 /** Weather at takeoff or landing ([event]), marked as a forecast while it's still ahead. */
 @Composable
@@ -435,8 +448,11 @@ private fun TimeRow(code: String, name: String?, best: Instant?, sched: Instant?
         Text(code, fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Text(name ?: "", fontSize = 13.sp, color = C.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         val c = chips.filter { it.isNotEmpty() }
-        if (c.isNotEmpty()) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        val gate = c.firstOrNull { it.startsWith("Gate ") }?.removePrefix("Gate ").orEmpty()
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             c.forEach { Badge(it, C.orange) }
+            // The airport's indoor map, opened on this gate.
+            Box(Modifier.clip(CircleShape).clickable { Nav.push(Screen.AirportMap(code, gate)) }) { Badge("Map", C.blue) }
         }
     }
     Column(horizontalAlignment = Alignment.End) {
@@ -474,7 +490,11 @@ internal fun DetailsGroup(f: Flight, onEdit: (EditRequest) -> Unit) = Group {
         }
     }
     Hairline(50.dp)
-    Cell("Aircraft", listOf(f.aircraft, f.reg).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { "—" }, icon = Icons.Filled.AirplanemodeActive)
+    Cell(
+        "Aircraft", f.reg.ifEmpty { f.aircraft.ifEmpty { "—" } }, subtitle = f.aircraft.takeIf { it.isNotEmpty() && f.reg.isNotEmpty() },
+        icon = Icons.Filled.AirplanemodeActive, chevron = f.reg.isNotEmpty(),
+        onClick = f.reg.takeIf { it.isNotEmpty() }?.let { { Nav.push(Screen.Aircraft(it, f.aircraft)) } },
+    )
     if (!f.mine) {
         Hairline(50.dp)
         Cell("Traveler", f.friend, icon = Icons.Filled.Person, chevron = true) {

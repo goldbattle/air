@@ -21,6 +21,12 @@ sealed class Screen {
     /** An airport's page, with its guide. */
     data class AirportInfo(val code: String) : Screen()
 
+    /** An airport's indoor map, opened on [gate] when it's mapped. */
+    data class AirportMap(val code: String, val gate: String = "") : Screen()
+
+    /** An aircraft's page by tail number, with its age and recent flights. */
+    data class Aircraft(val reg: String, val model: String = "") : Screen()
+
     /** An airline's page, with its guide. */
     data class AirlineInfo(val code: String) : Screen()
 

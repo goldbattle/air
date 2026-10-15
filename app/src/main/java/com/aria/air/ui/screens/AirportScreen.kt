@@ -75,6 +75,10 @@ fun AirportScreen(code: String) {
                     Cell("Time zone", a.tz.id.replace('_', ' '), icon = Icons.Filled.Public)
                     Hairline(50.dp)
                     Cell("Your flights here", "${mine.size}", icon = Icons.Filled.Flight)
+                    Hairline(50.dp)
+                    Cell("Terminal map", subtitle = "Gates, food, restrooms and shops, by floor", icon = Icons.Filled.Map, chevron = true) {
+                        Nav.push(Screen.AirportMap(code))
+                    }
                 }
             }
         }
