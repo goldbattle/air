@@ -8,7 +8,17 @@ import com.aria.air.sync.*
 import com.aria.air.ui.components.*
 import com.aria.air.ui.map.*
 import com.aria.air.util.*
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Looper
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.MyLocation
 import android.net.Uri
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -104,6 +114,19 @@ fun AirportMapScreen(code: String, gate: String) {
     var view by remember { mutableStateOf<View?>(null) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
+    // You are here: asked for the first time you tap the locate button, then shown whenever the map is open.
+    fun granted() = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        .any { ctx.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+    var allowed by remember { mutableStateOf(granted()) }
+    var follow by remember { mutableStateOf(false) } // center on the next fix
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        allowed = granted()
+        if (allowed) follow = true
+        else Toast.makeText(ctx, "Location is off for Air. Turn it on in Settings to see where you are.", Toast.LENGTH_LONG).show()
+    }
+    val fix = rememberHere(allowed)
+    // Only near the airport: from farther away the dot would just sit off the map.
+    val here = fix?.takeIf { a != null && distKm(a.lat, a.lon, it.latitude, it.longitude) < NEAR_KM }
 
     Box(Modifier.fillMaxSize().background(C.sea).onSizeChanged { size = it }) {
         if (map != null && a != null && size.width > 0) {
@@ -114,7 +137,15 @@ fun AirportMapScreen(code: String, gate: String) {
                 target?.let { View(proj.x(it.at), proj.y(it.at), max(fit.scale, size.width / 450.0)) } ?: fit
             }
             val v = view ?: start
-            IndoorCanvas(map, proj, v, level, filter, target, picked)
+            LaunchedEffect(follow, fix) {
+                if (!follow || fix == null) return@LaunchedEffect
+                // A rough first fix (a cell tower miles off) is often followed by a good one: wait a moment for it.
+                if (here == null) delay(5_000)
+                follow = false
+                if (here == null) Toast.makeText(ctx, "You're ${fmtInt((distKm(a.lat, a.lon, fix.latitude, fix.longitude) / KM_PER_MI).roundToInt())} mi from $code", Toast.LENGTH_SHORT).show()
+                else view = View(proj.x(Pt(here.latitude, here.longitude)), proj.y(Pt(here.latitude, here.longitude)), max(v.scale, size.width / 300.0))
+            }
+            IndoorCanvas(map, proj, v, level, filter, target, picked, here)
             Box(
                 Modifier.fillMaxSize()
                     .pointerInput(map) {
@@ -136,9 +167,19 @@ fun AirportMapScreen(code: String, gate: String) {
                         }
                     },
             )
-            if (map.levels.size > 1) LevelPicker(
-                map.levels, level, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 68.dp, end = 12.dp),
-            ) { level = it; picked = null }
+            Column(
+                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 68.dp, end = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(Modifier.shadow(3.dp, CircleShape)) {
+                    MapButton(Icons.Filled.MyLocation, "Where am I") {
+                        if (!allowed) ask.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                        else if (fix == null) { follow = true; Toast.makeText(ctx, "Finding you…", Toast.LENGTH_SHORT).show() }
+                        else follow = true
+                    }
+                }
+                if (map.levels.size > 1) LevelPicker(map.levels, level, Modifier) { level = it; picked = null }
+            }
             if (map.features.none { it.kind >= Place.ROOM }) Notice(
                 Icons.Filled.Map, "Only the outlines so far",
                 "OpenStreetMap volunteers haven't mapped the inside of $code yet.", Modifier.align(Alignment.Center),
@@ -244,7 +285,7 @@ private fun hit(map: IndoorMap, proj: Proj, v: View, size: IntSize, p: Offset, l
 
 /** The map itself: floor plan shapes in map space, then icons, gate numbers and labels in screen space. */
 @Composable
-private fun IndoorCanvas(map: IndoorMap, proj: Proj, v: View, level: Double?, filter: Place?, target: Feature?, picked: Feature?) {
+private fun IndoorCanvas(map: IndoorMap, proj: Proj, v: View, level: Double?, filter: Place?, target: Feature?, picked: Feature?, here: Location?) {
     val visible = remember(map, level) { map.features.filter { it.on(level) } }
     // Shapes in meters, built once per floor; the canvas transform moves and scales them.
     val shapes = remember(visible) {
@@ -290,13 +331,13 @@ private fun IndoorCanvas(map: IndoorMap, proj: Proj, v: View, level: Double?, fi
                 c.drawText(t.ref.ifEmpty { t.name }.take(4), x, y + paint.textSize * 0.36f, paint)
                 taken += android.graphics.RectF(x - r, y - r, x + r, y + r)
             }
-            // Zoomed out, only the places people look for; elevators, stairs and the like join once zoomed in.
+            // Only the places people look for; elevators, ATMs, water and the like show when picked below.
             val minor = setOf(Place.ELEVATOR, Place.STAIRS, Place.MONEY, Place.INFO, Place.CHARGING, Place.WATER)
-            val shown = pois.filter { if (filter != null) it.kind == filter else zoomedIn || it.kind !in minor }
-                .sortedBy { (if (it.kind in minor) 2 else 0) + (if (it.name.isEmpty()) 1 else 0) } // food and shops win space
+            val shown = pois.filter { if (filter != null) it.kind == filter else it.kind !in minor }
+                .sortedBy { if (it.name.isEmpty()) 1 else 0 }
             for (f in shown) {
                 val x = sx(f); val y = sy(f)
-                val r = (if (filter != null) 13 else if (f.kind in minor) 8 else 11).dp.toPx()
+                val r = (if (filter != null) 13 else 11).dp.toPx()
                 if (!onScreen(x, y) || !free(android.graphics.RectF(x - r, y - r, x + r, y + r))) continue
                 paint.color = if (f == picked) colors.blue else colors.chip
                 c.drawCircle(x, y, r, paint)
@@ -330,7 +371,51 @@ private fun IndoorCanvas(map: IndoorMap, proj: Proj, v: View, level: Double?, fi
                 }
             }
         }
+        // You are here, on top of everything, with how sure the phone is as a faint circle (Wi-Fi indoors: tens of
+        // meters). Phones can't tell the floor, so it shows on every level.
+        here?.let { h ->
+            val p = Pt(h.latitude, h.longitude)
+            val c = Offset((dx + proj.x(p) * s).toFloat(), (dy + proj.y(p) * s).toFloat())
+            val acc = (h.accuracy * s).coerceAtMost(size.maxDimension)
+            if (acc > 9.dp.toPx()) {
+                drawCircle(C.blue.copy(alpha = 0.14f), acc, c)
+                drawCircle(C.blue.copy(alpha = 0.35f), acc, c, style = Stroke(1.dp.toPx()))
+            }
+            drawCircle(Color.White, 9.dp.toPx(), c)
+            drawCircle(C.blue, 6.5.dp.toPx(), c)
+        }
     }
+}
+
+/** How close to the airport the dot is shown, and the locate button centers on you. */
+private const val NEAR_KM = 5.0
+
+/**
+ * Where the phone is while [on], from Android's own location service (GPS, Wi-Fi, cell), updated every few seconds.
+ * Read on the phone only; nothing is sent anywhere.
+ */
+@Composable
+private fun rememberHere(on: Boolean): Location? {
+    val ctx = LocalContext.current
+    var here by remember { mutableStateOf<Location?>(null) }
+    DisposableEffect(on) {
+        val lm = ctx.getSystemService(LocationManager::class.java)
+        // A newer fix wins unless it's much vaguer than a recent one (a cell fix right after a Wi-Fi one).
+        val listener = LocationListener { l ->
+            val h = here
+            if (h == null || (l.time > h.time && (l.accuracy <= h.accuracy * 2 || l.time - h.time > 30_000))) here = l
+        }
+        if (on && lm != null) runCatching { // SecurityException if the permission was just taken away
+            // The fused provider blends GPS, Wi-Fi and cell; without it, ask each one and keep the best.
+            val all = lm.getProviders(true)
+            for (provider in if (LocationManager.FUSED_PROVIDER in all) listOf(LocationManager.FUSED_PROVIDER) else all) {
+                lm.getLastKnownLocation(provider)?.takeIf { System.currentTimeMillis() - it.time < 10 * 60_000 }?.let(listener::onLocationChanged)
+                lm.requestLocationUpdates(provider, 2_000L, 2f, listener, Looper.getMainLooper())
+            }
+        }
+        onDispose { runCatching { lm?.removeUpdates(listener) } }
+    }
+    return here
 }
 
 /** Fills for each kind of place, from the app palette so dark mode works. */

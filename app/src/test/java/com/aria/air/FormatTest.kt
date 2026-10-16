@@ -127,6 +127,30 @@ class FormatTest : AirTest() {
     }
 
     @Test
+    fun widgetCyclesMineAndFriends() {
+        val slots = (0L until 8).map { NOW.plus(min(30 * it)) }
+        fun shown() = slots.map { widgetFlight(it)?.id }
+        Store.flights.clear()
+        try {
+            assertEquals(List(8) { null }, shown())
+            // No flight of mine: friends' upcoming flights take turns, even weeks out.
+            val ann = flight(hours(24 * 20)).copy(id = "ann", friend = "Ann Lee")
+            val bob = flight(hours(24 * 30)).copy(id = "bob", friend = "Bob")
+            Store.flights += listOf(ann, bob)
+            assertEquals(setOf("ann", "bob"), shown().toSet())
+            // Mine two weeks out: mine and friends' alternate.
+            Store.flights += flight(hours(24 * 14)).copy(id = "me")
+            assertEquals(4, shown().count { it == "me" })
+            // Mine tomorrow: mine three turns in four.
+            Store.flights.removeAll { it.id == "me" }
+            Store.flights += flight(hours(24)).copy(id = "me")
+            assertEquals(6, shown().count { it == "me" })
+        } finally {
+            Store.flights.clear()
+        }
+    }
+
+    @Test
     fun cardAndWidgetDetails() {
         val f = flight(hours(2)).copy(depGate = "F12", seat = "21C", arrGate = "B5", baggage = "4")
         assertEquals("Gate F12 · Seat 21C", detailLine(f))

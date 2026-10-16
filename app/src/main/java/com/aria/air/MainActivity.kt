@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
             val f = Store.get(id) ?: return
             Nav.open(if (f.mine) Tab.Flights else Tab.Friends)
             Nav.push(Screen.FlightDetail(id))
+            intent.getStringExtra("map")?.let { Nav.push(Screen.AirportMap(it, intent.getStringExtra("gate") ?: "")) }
             return
         }
         if (intent.getBooleanExtra("mail", false)) { Nav.open(Tab.Settings); Nav.push(Screen.MailFound); return }

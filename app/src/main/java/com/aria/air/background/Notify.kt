@@ -4,6 +4,7 @@ package com.aria.air.background
 
 import com.aria.air.*
 import com.aria.air.data.*
+import com.aria.air.sync.IndoorMaps
 import com.aria.air.util.*
 import android.app.Notification
 import android.app.NotificationChannel
@@ -40,6 +41,14 @@ object Notify {
     private fun open(ctx: Context, f: Flight) = PendingIntent.getActivity(
         ctx, f.id.hashCode(),
         Intent(ctx, MainActivity::class.java).putExtra("flight", f.id).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /** Opens [code]'s terminal map on [gate], over the flight. */
+    private fun openMap(ctx: Context, f: Flight, code: String, gate: String) = PendingIntent.getActivity(
+        ctx, (f.id + "map").hashCode(),
+        Intent(ctx, MainActivity::class.java).putExtra("flight", f.id).putExtra("map", code).putExtra("gate", gate)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
@@ -129,6 +138,13 @@ object Notify {
             .setGroup("live-${f.id}") // its own card, not bundled with alerts
             // Flight times aren't private: show the full card on the lock screen even when content is hidden.
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+        // At the airport (before takeoff, or after landing) the terminal map is a tap away, when it's on the phone.
+        if (f.mine && !flying) {
+            val (code, gate) = if (landed) f.to to f.arrGate else f.from to f.depGate
+            if (IndoorMaps.saved(code) != null) b.addAction(
+                Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_walk), "Terminal map", openMap(ctx, f, code, gate)).build(),
+            )
+        }
         if (!landed) b.setWhen(target.toEpochMilli()).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
         if (progress != null) {
             val color = if (flying || landed) 0xFF0A84FF.toInt() else 0xFFFF9F0A.toInt()

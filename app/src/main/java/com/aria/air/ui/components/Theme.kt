@@ -34,6 +34,27 @@ object C {
     val red get() = pick(0xFFFF3B30, 0xFFFF453A)
     val land get() = pick(0xFFE3E6EC, 0xFF2C2C2E)
     val sea get() = pick(0xFFF7F8FA, 0xFF111113)
+
+    /** My flights' color and friends' (Settings › About), on routes, cards, the widget and the passport. */
+    val mine get() = Accent.mine.let { pick(it.light, it.dark) }
+    val friend get() = Accent.friend.let { pick(it.light, it.dark) }
+    fun of(f: Flight) = if (f.mine) mine else friend
+}
+
+/** Colors to tell my flights from friends' by. No green, orange or red: those mean on time, late and cancelled. */
+enum class Accent(val light: Long, val dark: Long) {
+    Blue(0xFF007AFF, 0xFF0A84FF),
+    Indigo(0xFF5856D6, 0xFF5E5CE6),
+    Purple(0xFFAF52DE, 0xFFBF5AF2),
+    Pink(0xFFFF2D55, 0xFFFF375F),
+    Teal(0xFF30B0C7, 0xFF40C8E0),
+    Brown(0xFFA2845E, 0xFFAC8E68);
+
+    companion object {
+        private fun pref(k: String, default: Accent) = entries.firstOrNull { it.name == Prefs[k] } ?: default
+        var mine: Accent get() = pref("mineColor", Blue); set(v) { Prefs["mineColor"] = v.name }
+        var friend: Accent get() = pref("friendColor", Purple); set(v) { Prefs["friendColor"] = v.name }
+    }
 }
 
 /** Material 3 with [C]'s colors, so stock pieces (dialogs, switches, menus) match the rest of the app. */

@@ -118,7 +118,7 @@ fun FullMap(f: Flight, pulls: Int, onClose: () -> Unit) {
                 },
         ) {
             WorldMap(
-                listOf(MapRoute(o, d, highlight = true)), Modifier.fillMaxSize(), focus = true, plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
+                listOf(MapRoute(o, d, highlight = true)), Modifier.fillMaxSize(), focus = true, line = C.of(f), dot = C.of(f), plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
                 camera = camera, onFit = { fit[0] = it },
                 under = radar?.let { r -> { x, y -> drawWeatherMap(r, x, y, 0.65f) } },
                 over = { x, y ->

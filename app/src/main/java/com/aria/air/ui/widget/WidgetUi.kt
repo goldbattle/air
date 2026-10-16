@@ -5,6 +5,7 @@ package com.aria.air.ui.widget
 import com.aria.air.*
 import com.aria.air.api.*
 import com.aria.air.data.*
+import com.aria.air.ui.components.Accent
 import com.aria.air.ui.map.*
 import com.aria.air.util.*
 import android.content.Context
@@ -59,11 +60,47 @@ private object W {
     val red = DayNight(Color(0xFFFF3B30), Color(0xFFFF453A))
 }
 
-/** Mine first (in the air, or next to leave), else a friend's flight that's in the air. */
-internal fun widgetFlight(): Flight? {
-    val active = Store.flights.filter { it.upcoming && !it.cancelled }
-    return active.filter { it.mine }.minByOrNull { it.depGuess }
-        ?: active.filter { it.phase() == Phase.InFlight }.minByOrNull { it.arrGuess }
+/** How long the widget shows one flight before moving to the next. About one background check (Tracker). */
+private val SLOT: Duration = Duration.ofMinutes(30)
+
+/**
+ * The flight the widget shows, cycling by half hour. My flight that's in the air or leaves within two days has it
+ * three turns in four, friends' the fourth; otherwise my next few flights and friends' take turns.
+ */
+internal fun widgetFlight(now: Instant = Instant.now(clock)): Flight? {
+    val (mine, theirs) = Store.flights.filter { it.upcoming && !it.cancelled }.sortedBy { it.depGuess }.partition { it.mine }
+    val friends = theirs.sortedBy { if (it.phase(now) == Phase.InFlight) 0 else 1 }.take(3) // in the air first
+    val slot = now.epochSecond / SLOT.seconds
+    val next = mine.firstOrNull()
+    if (next != null && (next.phase(now) == Phase.InFlight || Duration.between(now, next.depGuess) < Duration.ofDays(2)))
+        return if (slot % 4 != 3L || friends.isEmpty()) next else friends[((slot / 4) % friends.size).toInt()]
+    // Alternate mine and friends' (each cycling through its own), or just whichever there is.
+    val mineSoon = mine.take(3)
+    val pool = when {
+        mineSoon.isEmpty() || friends.isEmpty() -> mineSoon + friends
+        slot % 2 == 0L -> mineSoon
+        else -> friends
+    }
+    if (pool.isEmpty()) return null
+    val turn = if (mineSoon.isEmpty() || friends.isEmpty()) slot else slot / 2
+    return pool[(turn % pool.size).toInt()]
+}
+
+/** The flight's color from Settings: mine or friends'. */
+private fun accent(f: Flight) = (if (f.mine) Accent.mine else Accent.friend).let { DayNight(Color(it.light), Color(it.dark)) }
+
+/** Whose flight it is, as a pill in the friends' color; nothing for mine. */
+@Composable
+private fun Who(f: Flight) {
+    if (f.mine) return
+    val a = Accent.friend
+    Text(
+        f.friend.substringBefore(' '),
+        style = TextStyle(color = accent(f), fontSize = 11.sp, fontWeight = FontWeight.Bold), maxLines = 1,
+        modifier = GlanceModifier.background(DayNight(Color(a.light).copy(alpha = 0.18f), Color(a.dark).copy(alpha = 0.28f)))
+            .cornerRadius(8.dp).padding(horizontal = 6.dp, vertical = 1.dp),
+    )
+    Spacer(GlanceModifier.width(6.dp))
 }
 
 /** What the big line says: the headline and the countdown under it. */
@@ -151,7 +188,7 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
         else -> 0.0
     }
     val split = (if (flown >= 2) flown - 1 else (p * (arc.size - 1)).roundToInt()).coerceIn(0, arc.size - 1)
-    val blue = if (night) 0xFF0A84FF.toInt() else 0xFF007AFF.toInt()
+    val blue = (if (f.mine) Accent.mine else Accent.friend).let { if (night) it.dark else it.light }.toInt() // mine or friends' color
     val stroke = 3.2f * density
     fun line(from: Int, to: Int, paint: android.graphics.Paint) {
         if (to <= from) return
@@ -271,14 +308,15 @@ private fun Small(f: Flight) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             AirlineChip(f)
             Spacer(GlanceModifier.width(6.dp))
+            Who(f)
             Text(
-                if (f.mine) f.label else "${f.friend.substringBefore(' ')} · ${f.label}",
+                f.label,
                 style = TextStyle(color = W.label, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1,
             )
         }
         Spacer(GlanceModifier.defaultWeight())
         Text(title, style = TextStyle(color = W.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-        Text(big, style = TextStyle(color = if (flying) W.blue else W.label, fontSize = 32.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+        Text(big, style = TextStyle(color = if (flying || !f.mine) accent(f) else W.label, fontSize = 32.sp, fontWeight = FontWeight.Bold), maxLines = 1)
         Text(
             if (flying) "Lands ${time(f.arr ?: f.arrGuess, f.toTz)}"
             else listOfNotNull(time(f.dep, f.fromTz).takeIf { f.dep != null }, detailLine(f).takeIf { it.isNotEmpty() }).joinToString(" · ").ifEmpty { "${f.from} → ${f.to}" },
@@ -301,8 +339,9 @@ private fun Wide(f: Flight, weather: Boolean) {
         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AirlineChip(f)
             Spacer(GlanceModifier.width(6.dp))
+            Who(f)
             Text(
-                (if (f.mine) "" else "${f.friend.substringBefore(' ')} · ") + "${f.label} · ${f.dest?.city ?: f.to}",
+                "${f.label} · ${f.dest?.city ?: f.to}",
                 style = TextStyle(color = W.label, fontSize = 14.sp, fontWeight = FontWeight.Medium), maxLines = 1,
                 modifier = GlanceModifier.defaultWeight(),
             )
@@ -312,7 +351,7 @@ private fun Wide(f: Flight, weather: Boolean) {
         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
             Column(GlanceModifier.defaultWeight()) {
                 Text(title, style = TextStyle(color = W.secondary, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
-                Text(big, style = TextStyle(color = if (phase == Phase.InFlight) W.blue else W.label, fontSize = 40.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+                Text(big, style = TextStyle(color = if (phase == Phase.InFlight || !f.mine) accent(f) else W.label, fontSize = 40.sp, fontWeight = FontWeight.Bold), maxLines = 1)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(

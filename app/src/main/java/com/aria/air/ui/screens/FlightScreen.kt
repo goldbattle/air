@@ -208,7 +208,7 @@ private fun MapHeader(f: Flight, pulls: Int) {
             val radar = rememberWeatherMap(f, pulls) // live radar, or the rain during the flight (MapLayers.kt)
             val wx = f.routeWx?.takeIf { Layers.weather }
             WorldMap(
-                listOf(MapRoute(o, d, highlight = true)), Modifier.matchParentSize(), focus = true, centerY = 0.36f,
+                listOf(MapRoute(o, d, highlight = true)), Modifier.matchParentSize(), focus = true, centerY = 0.36f, line = C.of(f), dot = C.of(f),
                 plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
                 under = radar?.let { r -> { x, y -> drawWeatherMap(r, x, y, 0.5f) } }, // radar layer
                 over = wx?.let { w -> { x, y -> drawRouteWx(w, o.lon, x, y) } }, // route weather layer (MapLayers.kt)

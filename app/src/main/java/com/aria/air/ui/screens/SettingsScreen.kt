@@ -24,7 +24,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,6 +83,15 @@ private fun AboutTab() {
     val miles = mine.filter { !it.cancelled && it.phase() == Phase.Done }.sumOf { it.distanceKm } / KM_PER_MI
     SectionHeader("You")
     Group { FieldCell("Name", Prefs.name, "For your passport") { Prefs.name = it } }
+    SectionHeader("Colors")
+    Group {
+        val ctx = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val redraw = { scope.launch { FlightWidget.refresh(ctx) } } // the widget doesn't watch settings
+        Swatches("My flights", Accent.mine) { Accent.mine = it; redraw() }
+        Hairline()
+        Swatches("Friends' flights", Accent.friend) { Accent.friend = it; redraw() }
+    }
     SectionHeader("Stats")
     Group {
         Cell("My flights", "${mine.size}")
@@ -117,6 +133,22 @@ private fun AboutTab() {
                 "if you add a key). Air asks GitHub for updates and, if you link email, reads booking emails straight from " +
                 "your mail server. Nothing else leaves this phone.",
             fontSize = 14.sp, color = C.secondary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        )
+    }
+}
+
+/** A row of color dots to pick from, the picked one ringed. */
+@Composable
+private fun Swatches(label: String, picked: Accent, onPick: (Accent) -> Unit) = Row(
+    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+) {
+    Text(label, fontSize = 17.sp, modifier = Modifier.weight(1f))
+    for (a in Accent.entries) {
+        val c = Color(if (C.dark) a.dark else a.light)
+        Box(
+            Modifier.padding(start = 6.dp).size(28.dp).clip(CircleShape)
+                .border(2.dp, if (a == picked) c else Color.Transparent, CircleShape).padding(4.dp).clip(CircleShape)
+                .background(c).clickable { onPick(a) },
         )
     }
 }

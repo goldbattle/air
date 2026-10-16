@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -177,7 +178,7 @@ private fun PassportCard(list: List<Flight>, s: Stats, year: Int?) {
     val soft = Color.White.copy(alpha = 0.7f)
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF1B1F6B), Color(0xFF4338CA), Color(0xFF7C3AED))))
+            .background(Brush.linearGradient(listOf(lerp(C.mine, Color.Black, 0.6f), lerp(C.mine, Color.Black, 0.25f), C.mine)))
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -189,7 +190,7 @@ private fun PassportCard(list: List<Flight>, s: Stats, year: Int?) {
         Spacer(Modifier.height(14.dp))
         WorldMap(
             routes, Modifier.fillMaxWidth().aspectRatio(2f).clip(RoundedCornerShape(12.dp)),
-            land = Color.White.copy(alpha = 0.22f), sea = Color.Transparent, line = Color(0xFFFFB4D9), dot = Color(0xFFFF6FB5),
+            land = Color.White.copy(alpha = 0.22f), sea = Color.Transparent, line = lerp(C.mine, Color.White, 0.65f), dot = Color.White,
         )
         Spacer(Modifier.height(16.dp))
         Row {

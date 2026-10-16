@@ -22,11 +22,15 @@ yourself.
 - Optional Gmail scan: link one or more mailboxes with an app password and Air finds past and new bookings for you
   to pick from. Manual, or every few weeks in the background.
 - Terminal maps from OpenStreetMap: floors, gates, food, restrooms and shops, opened on your gate. The 30 busiest US
-  airports ship with the app; others download once and then work offline. Tap the Map chip on a flight.
+  airports ship with the app; others download once and then work offline. Tap the Map chip on a flight, or the
+  Terminal map button on the live notification. A you-are-here dot (location is read on the phone only, while the map
+  is open).
 - An aircraft page for the plane flying your flight: model, age, seats, and how late its last week of flights landed.
 - A passport view: every past flight on a map, with miles, time in the air, top airports/airlines/routes/aircraft,
   and a year in review (estimated CO₂, on-time rate, busiest month, new airports, the year before).
-- A home screen widget with the route map, radar and a countdown to your next flight.
+- A home screen widget with the route map, radar and a countdown. It takes turns between your upcoming flights and
+  friends', and stays on yours once it's in the air or within two days.
+- Pick a color for your flights and one for friends' (Settings › About): routes, cards, the widget and the passport.
 
 ## Install
 

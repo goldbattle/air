@@ -111,13 +111,13 @@ fun FlightsScreen(friends: Boolean) {
 /** Connecting flights as one journey: the route on top, then each leg's card with the layover between them. */
 @Composable
 fun ConnectionCard(legs: List<Flight>, now: Instant, showFriend: Boolean) = Column(
-    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(C.blue.copy(alpha = 0.08f))
-        .border(1.dp, C.blue.copy(alpha = 0.25f), RoundedCornerShape(18.dp)).padding(6.dp),
+    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(C.of(legs.first()).copy(alpha = 0.08f))
+        .border(1.dp, C.of(legs.first()).copy(alpha = 0.25f), RoundedCornerShape(18.dp)).padding(6.dp),
 ) {
     val first = legs.first()
     val last = legs.last()
     Row(Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Filled.ConnectingAirports, null, tint = C.blue, modifier = Modifier.size(18.dp))
+        Icon(Icons.Filled.ConnectingAirports, null, tint = C.of(legs.first()), modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
         Text(
             (listOf(first.from) + legs.map { it.to }).joinToString(" → "),
@@ -197,8 +197,8 @@ fun FlightCard(f: Flight, now: Instant, showFriend: Boolean = false, onClick: ()
                 }
                 if (showFriend) {
                     Spacer(Modifier.width(8.dp))
-                    Icon(Icons.Filled.Person, null, tint = C.secondary, modifier = Modifier.size(15.dp))
-                    Text(f.friend, fontSize = 15.sp, color = C.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Icon(Icons.Filled.Person, null, tint = C.friend, modifier = Modifier.size(15.dp))
+                    Text(f.friend, fontSize = 15.sp, color = C.friend, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 }
                 Spacer(Modifier.weight(1f))
                 Badge(status, toneColor(tone))
@@ -207,7 +207,7 @@ fun FlightCard(f: Flight, now: Instant, showFriend: Boolean = false, onClick: ()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Endpoint(f.from, f.origin?.city, f.dep, f.depSched, f.fromTz, f.depDelay, Alignment.Start, Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 6.dp)) {
-                    Icon(Icons.Filled.Flight, null, tint = C.tertiary, modifier = Modifier.size(18.dp).rotate(90f))
+                    Icon(Icons.Filled.Flight, null, tint = C.of(f), modifier = Modifier.size(18.dp).rotate(90f))
                     Text(middleLabel(f, phase, now), fontSize = 13.sp, color = C.secondary, textAlign = TextAlign.Center)
                 }
                 Endpoint(f.to, f.dest?.city, f.arr, f.arrSched, f.toTz, f.arrDelay, Alignment.End, Modifier.weight(1f))
@@ -227,7 +227,7 @@ fun FlightCard(f: Flight, now: Instant, showFriend: Boolean = false, onClick: ()
             }
             if (phase == Phase.InFlight) {
                 Spacer(Modifier.height(12.dp))
-                ProgressLine(f.progress(now))
+                ProgressLine(f.progress(now), color = C.of(f))
                 Text(
                     buildString {
                         append("${span(Duration.between(now, f.arr ?: f.arrGuess).let { if (it.isNegative) Duration.ZERO else it })} left")
