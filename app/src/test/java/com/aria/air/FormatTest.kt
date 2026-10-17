@@ -195,9 +195,13 @@ class FormatTest : AirTest() {
         assertEquals(Pt(p.first, p.second, 35000, at.epochSecond), mp.flown.last())
         assertEquals(p.first, mp.guess.first().lat, 1e-6); assertEquals(est.lat, mp.guess.last().lat, 1e-6)
         assertEquals(est.lat, mp.rest.first().lat, 1e-6); assertEquals(bos.lat, mp.rest.last().lat, 1e-6)
-        // Signal back: the real track again, nothing estimated.
-        val back = g.copy(live = Live(est.lat, est.lon, 35000, 480, 70.0, 0, NOW, false))
-        assertTrue(back.paths(emptyList(), emptyList(), 0, NOW).guess.isEmpty())
+        // Signal back: solid again from the new fix, but the 2 h unheard stay dotted (a great circle, not a jump).
+        val fix = Live(est.lat, est.lon, 35000, 480, 70.0, 0, NOW, false)
+        val back = g.copy(live = fix).record(fix).paths(emptyList(), emptyList(), 0, NOW)
+        assertTrue(back.guess.isEmpty())
+        val gap = back.gaps.last() // the first is before the first fix, after takeoff
+        assertEquals(p.first, back.flown[gap.first].lat, 1e-6); assertEquals(est.lat, back.flown[gap.last].lat, 1e-6)
+        assertTrue(gap.last - gap.first > 2)
         assertEquals(null, flight(hours(2)).plane(NOW)) // not flying yet
     }
 

@@ -186,7 +186,7 @@ private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, 
     // Every arc is unwrapped around the first one's start, so routes across the date line stay together.
     var ref: Double? = null
     // [flown] and [guess] count arc points: solid to the last fix, dotted on to the estimated plane (signal lost).
-    class Line(val f: Flight, val arc: List<Pair<Double, Double>>, val color: Int, val flown: Int, val guess: Int)
+    class Line(val f: Flight, val arc: List<Pair<Double, Double>>, val color: Int, val flown: Int, val guess: Int, val gaps: List<IntRange>)
     val lines = fs.zip(hues(fs)).mapNotNull { (f, hue) ->
         val o = f.origin ?: return@mapNotNull null
         val d = f.dest ?: return@mapNotNull null
@@ -194,7 +194,7 @@ private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, 
         val mp = f.paths(emptyList(), emptyList(), 0)
         val known = if (mp.guess.isNotEmpty()) mp.flown.ifEmpty { mp.guess.take(1) } + mp.guess.drop(1) else mp.flown
         val arc = unwrap(if (known.size < 2) greatCircle(o.lat, o.lon, d.lat, d.lon, 96).map { Pt(it.first, it.second) } else known + mp.rest.drop(1), r)
-        Line(f, arc, if (night) hue.second else hue.first, if (mp.guess.isEmpty()) mp.flown.size else maxOf(mp.flown.size, 1), maxOf(mp.guess.size - 1, 0))
+        Line(f, arc, if (night) hue.second else hue.first, if (mp.guess.isEmpty()) mp.flown.size else maxOf(mp.flown.size, 1), maxOf(mp.guess.size - 1, 0), mp.gaps)
     }
     if (lines.isEmpty()) return null
     val w = (wDp * density).roundToInt().coerceIn(1, 1400)
@@ -265,7 +265,16 @@ private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, 
         draw(solid, split, android.graphics.Paint(base).apply {
             color = l.color; pathEffect = android.graphics.DashPathEffect(floatArrayOf(0.01f, 1.8f * stroke), 0f)
         })
-        draw(0, solid, android.graphics.Paint(base).apply { color = l.color })
+        // Flown solid, dotted across stretches the plane wasn't heard (Track.kt bridge).
+        val dots = android.graphics.Paint(base).apply {
+            color = l.color; pathEffect = android.graphics.DashPathEffect(floatArrayOf(0.01f, 1.8f * stroke), 0f)
+        }
+        var from = 0
+        for (g in l.gaps.filter { it.last <= solid }) {
+            draw(from, g.first, android.graphics.Paint(base).apply { color = l.color }); draw(g.first, g.last, dots)
+            from = g.last
+        }
+        draw(from, solid, android.graphics.Paint(base).apply { color = l.color })
         for ((la, lo) in listOf(arc.first(), arc.last())) {
             dot.color = ground; c.drawCircle(x(lo), y(la), 5.5f * density, dot)
             dot.color = l.color; c.drawCircle(x(lo), y(la), 3.8f * density, dot)

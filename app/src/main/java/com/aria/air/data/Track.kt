@@ -37,20 +37,45 @@ fun mergeTracks(a: List<Pt>, b: List<Pt>): List<Pt> = if (a == b || a.isEmpty())
 // ---------- What the map draws ----------
 
 /**
- * Faint past paths, the planned arc (or not), the flown path solid, [guess] (signal lost: from the last fix to where the
- * plane most likely is now, [plane]) dotted, and the rest of the way from the plane, dashed.
+ * Faint past paths, the planned arc (or not), the flown path solid but dotted over [gaps] (index ranges into [flown]
+ * where no signal was heard, bridged by the great circle), [guess] (signal lost: from the last fix to where the plane
+ * most likely is now, [plane]) dotted, and the rest of the way from the plane, dashed.
  */
-data class MapPaths(val typical: List<List<Pt>>, val arc: Boolean, val flown: List<Pt>, val rest: List<Pt>, val guess: List<Pt> = emptyList())
+data class MapPaths(
+    val typical: List<List<Pt>>, val arc: Boolean, val flown: List<Pt>, val rest: List<Pt>, val guess: List<Pt> = emptyList(),
+    val gaps: List<IntRange> = emptyList(),
+)
+
+/** Longer than this between two fixes, the plane wasn't heard (no coverage, adsb.lol down): estimated, not flown. */
+const val SEEN_GAP = 15 * 60L
+
+/** [pts] with each unheard stretch ([SEEN_GAP]) bridged by the great circle, and those stretches' index ranges. */
+fun bridge(pts: List<Pt>): Pair<List<Pt>, List<IntRange>> {
+    val out = mutableListOf<Pt>(); val gaps = mutableListOf<IntRange>()
+    pts.forEachIndexed { i, p ->
+        val q = pts.getOrNull(i - 1)
+        if (q != null && q.t > 0 && p.t > 0 && p.t - q.t > SEEN_GAP) {
+            val start = out.lastIndex
+            greatCircle(q.lat, q.lon, p.lat, p.lon, 16).drop(1).dropLast(1).forEach { out += Pt(it.first, it.second) }
+            gaps += start..out.size
+        }
+        out += p
+    }
+    return out to gaps
+}
 
 /** Past routes are kept per flight number and route: "UA100 SFO-BOS". */
 val Flight.routeKey get() = "$code $from-$to"
 
-/** The path actually flown: from the origin through the track, to the plane or (landed) the destination. */
+/**
+ * The path actually flown: from the origin through the track, to the plane or (landed) the destination. The ends carry
+ * takeoff and landing times when known, so a track that starts late or ends early shows as a gap ([bridge]).
+ */
 fun Flight.flownPath(landed: Boolean): List<Pt> {
     val o = origin ?: return emptyList(); val d = dest ?: return emptyList()
     if (track.isEmpty()) return emptyList()
-    val tip = if (landed) Pt(d.lat, d.lon) else live?.takeIf { isAirborne }?.let { Pt(it.lat, it.lon) }
-    return listOf(Pt(o.lat, o.lon)) + track + listOfNotNull(tip)
+    val tip = if (landed) Pt(d.lat, d.lon, 0, arrActual?.epochSecond ?: 0) else live?.takeIf { isAirborne }?.let { Pt(it.lat, it.lon) }
+    return listOf(Pt(o.lat, o.lon, 0, tookOff?.epochSecond ?: 0)) + track + listOfNotNull(tip)
 }
 
 /**
@@ -60,16 +85,16 @@ fun Flight.flownPath(landed: Boolean): List<Pt> {
  */
 fun Flight.paths(fetched: List<List<Pt>>, others: List<Flight>, max: Int, now: Instant = Instant.now(clock)): MapPaths {
     val landed = arrActual != null || phase(now) >= Phase.Arrival
-    val flown = flownPath(landed)
+    val (flown, gaps) = bridge(flownPath(landed))
     val mine = others.filter { it.id != id && it.track.isNotEmpty() && it.phase(now) == Phase.Done && (it.code == code || it.from == from && it.to == to) }
         .sortedWith(compareByDescending<Flight> { it.code == code }.thenByDescending { it.track.last().t }).map { it.flownPath(true) }
     val typical = (fetched + mine).take(max)
-    if (landed) return MapPaths(typical, flown.isEmpty(), flown, emptyList())
+    if (landed) return MapPaths(typical, flown.isEmpty(), flown, emptyList(), gaps = gaps)
     val o = origin; val d = dest
     fun arc(a: Pt, b: Pt, n: Int) = greatCircle(a.lat, a.lon, b.lat, b.lon, n).map { Pt(it.first, it.second) }
     val guess = plane(now)?.takeIf { it.estimated && o != null }?.let { arc(flown.lastOrNull() ?: Pt(o!!.lat, o.lon), Pt(it.lat, it.lon), 16) }.orEmpty()
     val rest = (guess.lastOrNull() ?: flown.lastOrNull())?.takeIf { d != null }?.let { arc(it, Pt(d!!.lat, d.lon), 32) }.orEmpty()
-    return MapPaths(typical, flown.isEmpty() && guess.isEmpty(), flown, rest, guess)
+    return MapPaths(typical, flown.isEmpty() && guess.isEmpty(), flown, rest, guess, gaps)
 }
 
 /** [paths] for the map: past paths per the Layers toggles (one by default, up to 3 with "all"). */

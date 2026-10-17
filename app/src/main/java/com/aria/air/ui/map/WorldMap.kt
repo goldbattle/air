@@ -128,7 +128,13 @@ fun WorldMap(
             if (paths.arc) arcs.forEach { stroke(it, line.copy(alpha = 0.75f), w * 0.8f, dash = true) }
             stroke(extra[1], line.copy(alpha = 0.5f), w * 0.7f, dash = true)
             stroke(extra[2], line, w, dots = true)
-            stroke(extra[0], line, w)
+            // Flown solid, dotted across stretches the plane wasn't heard.
+            var from = 0
+            for (g in paths.gaps) {
+                stroke(extra[0].subList(from, g.first + 1), line, w); stroke(extra[0].subList(g.first, g.last + 1), line, w, dots = true)
+                from = g.last
+            }
+            stroke(extra[0].subList(from, extra[0].size), line, w)
         } else routes.zip(arcs).sortedBy { it.first.highlight }.forEach { (route, pts) ->
             val p = Path()
             pts.forEachIndexed { i, (la, lo) -> if (i == 0) p.moveTo(x(lo), y(la)) else p.lineTo(x(lo), y(la)) }
