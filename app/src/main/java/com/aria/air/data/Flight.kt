@@ -121,9 +121,13 @@ val Flight.boardingLead: Duration
 /** Estimated start of boarding, or null without a departure time. */
 val Flight.boarding: Instant? get() = dep?.minus(boardingLead)
 
-/** My next few flights, then friends' (in the air first): the flights that take turns in one place, in order. */
+/**
+ * My next few flights, then friends' (in the air first): the flights that take turns in one place, in order. A
+ * connecting journey counts once, as the leg it's on now (or next).
+ */
 fun turnOrder(flights: List<Flight>, now: Instant): List<Flight> {
-    val (mine, theirs) = flights.filter { !it.cancelled }.sortedBy { it.depGuess }.partition { it.mine }
+    val legs = connections(flights.filter { !it.cancelled }).map { j -> j.firstOrNull { it.phase(now) != Phase.Done } ?: j.last() }
+    val (mine, theirs) = legs.sortedBy { it.depGuess }.partition { it.mine }
     return mine.take(3) + theirs.sortedBy { if (it.phase(now) == Phase.InFlight) 0 else 1 }.take(4)
 }
 

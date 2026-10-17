@@ -146,6 +146,11 @@ class FormatTest : AirTest() {
             Store.flights.removeAll { it.id == "me" }
             Store.flights += flight(hours(2)).copy(id = "me")
             assertEquals(8, shown().count { it == "me" })
+            // A friend's connection counts once: the leg they're on next.
+            val bobOn = flight(hours(24 * 30 + 7), from = "BOS", to = "PWM").copy(id = "bob2", friend = "Bob")
+            Store.flights += bobOn
+            assertEquals(listOf("me", "ann", "bob"), turnOrder(Store.flights.toList(), NOW).map { it.id })
+            Store.flights.remove(bobOn)
             // Tall: mine fixed on top, friends taking turns below.
             assertEquals(setOf(listOf("me", "ann"), listOf("me", "bob")), slots.map { t -> widgetFlights(true, t).map { it.id } }.toSet())
             // Next shows a friend's for one turn, then mine again.
