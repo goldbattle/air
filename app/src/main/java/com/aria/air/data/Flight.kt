@@ -120,3 +120,25 @@ val Flight.boardingLead: Duration
 
 /** Estimated start of boarding, or null without a departure time. */
 val Flight.boarding: Instant? get() = dep?.minus(boardingLead)
+
+/**
+ * Which of [flights] to show now, when one place (the widget, the status bar) takes turns between them, a new turn
+ * every [slot]. My next flight has three turns in four once it's in the air or leaves within two days, friends'
+ * the fourth; otherwise my next few flights and friends' alternate. Friends' in the air go first.
+ */
+fun takingTurns(flights: List<Flight>, now: Instant, slot: Duration): Flight? {
+    val (mine, theirs) = flights.filter { !it.cancelled }.sortedBy { it.depGuess }.partition { it.mine }
+    val friends = theirs.sortedBy { if (it.phase(now) == Phase.InFlight) 0 else 1 }.take(3)
+    val turn = now.epochSecond / slot.seconds
+    val next = mine.firstOrNull()
+    if (next != null && (next.phase(now) == Phase.InFlight || Duration.between(now, next.depGuess) < Duration.ofDays(2)))
+        return if (turn % 4 != 3L || friends.isEmpty()) next else friends[((turn / 4) % friends.size).toInt()]
+    val soon = mine.take(3)
+    // Alternate mine and friends' (each cycling through its own), or just whichever there is.
+    val (pool, n) = when {
+        soon.isEmpty() || friends.isEmpty() -> soon + friends to turn
+        turn % 2 == 0L -> soon to turn / 2
+        else -> friends to turn / 2
+    }
+    return pool.getOrNull((n % maxOf(pool.size, 1)).toInt())
+}

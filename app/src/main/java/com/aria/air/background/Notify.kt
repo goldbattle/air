@@ -165,7 +165,10 @@ object Notify {
             b.setStyle(Notification.BigTextStyle().bigText(text))
         }
         try {
-            b.setRequestPromotedOngoing(!landed).setShortCriticalText(chip)
+            // One flight at a time gets the status bar chip; with several live, they take turns (the rest stay in the
+            // shade). Each run of the background check (every few minutes while live) moves it along.
+            val star = takingTurns(Store.flights.filter { wantsLive(it, now) && it.phase(now) != Phase.Arrival }, now, Duration.ofMinutes(10))
+            b.setRequestPromotedOngoing(!landed && star?.id == f.id).setShortCriticalText(chip)
         } catch (_: LinkageError) {
         }
         nm.notify(id, b.build())

@@ -60,31 +60,9 @@ private object W {
     val red = DayNight(Color(0xFFFF3B30), Color(0xFFFF453A))
 }
 
-/** How long the widget shows one flight before moving to the next. About one background check (Tracker). */
-private val SLOT: Duration = Duration.ofMinutes(30)
-
-/**
- * The flight the widget shows, cycling by half hour. My flight that's in the air or leaves within two days has it
- * three turns in four, friends' the fourth; otherwise my next few flights and friends' take turns.
- */
-internal fun widgetFlight(now: Instant = Instant.now(clock)): Flight? {
-    val (mine, theirs) = Store.flights.filter { it.upcoming && !it.cancelled }.sortedBy { it.depGuess }.partition { it.mine }
-    val friends = theirs.sortedBy { if (it.phase(now) == Phase.InFlight) 0 else 1 }.take(3) // in the air first
-    val slot = now.epochSecond / SLOT.seconds
-    val next = mine.firstOrNull()
-    if (next != null && (next.phase(now) == Phase.InFlight || Duration.between(now, next.depGuess) < Duration.ofDays(2)))
-        return if (slot % 4 != 3L || friends.isEmpty()) next else friends[((slot / 4) % friends.size).toInt()]
-    // Alternate mine and friends' (each cycling through its own), or just whichever there is.
-    val mineSoon = mine.take(3)
-    val pool = when {
-        mineSoon.isEmpty() || friends.isEmpty() -> mineSoon + friends
-        slot % 2 == 0L -> mineSoon
-        else -> friends
-    }
-    if (pool.isEmpty()) return null
-    val turn = if (mineSoon.isEmpty() || friends.isEmpty()) slot else slot / 2
-    return pool[(turn % pool.size).toInt()]
-}
+/** The flight the widget shows: my upcoming flights and friends' take turns by half hour (see [takingTurns]). */
+internal fun widgetFlight(now: Instant = Instant.now(clock)): Flight? =
+    takingTurns(Store.flights.filter { it.upcoming }, now, Duration.ofMinutes(30))
 
 /** The flight's color from Settings: mine or friends'. */
 private fun accent(f: Flight) = (if (f.mine) Accent.mine else Accent.friend).let { DayNight(Color(it.light), Color(it.dark)) }
