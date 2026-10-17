@@ -75,8 +75,8 @@ private fun upcoming() = Store.flights.filter { it.upcoming }
 private fun rotating(stacked: Boolean, now: Instant) = turnOrder(upcoming(), now).let { if (stacked) it.drop(1) else it }
 
 /**
- * What the widget shows: one flight taking turns ([takingTurns]: my active flight always), or, [stacked] when the
- * widget is tall, the first in line fixed on top (my next flight, if any) and the others taking turns below it.
+ * What the widget shows: one flight taking turns ([takingTurns]: my active flight always), or, [stacked] at the large
+ * size, the first in line fixed on top (my next flight, if any) and the others taking turns below it.
  */
 internal fun widgetFlights(stacked: Boolean, now: Instant = Instant.now(clock)): List<Flight> {
     val top = if (stacked) turnOrder(upcoming(), now).firstOrNull() ?: return emptyList() else null
@@ -159,37 +159,59 @@ private fun isNight(ctx: Context) =
     (ctx.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
 
 /**
- * The route drawn for the widget background: a zoomed map with land faint enough to read text over, the great
- * circle across the middle (flown part solid, the rest faded) and the plane at its position. Glance can't draw, so
- * this is a bitmap sized to the widget.
+ * Each shown flight's line color, light and dark: mine or friends' ([Accent]); a second flight in the same color gets
+ * a shifted hue so the two routes tell apart.
  */
-private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: Boolean): android.graphics.Bitmap? {
-    val o = f.origin ?: return null
-    val d = f.dest ?: return null
+private fun hues(fs: List<Flight>): List<Pair<Int, Int>> = fs.mapIndexed { i, f ->
+    val a = if (f.mine) Accent.mine else Accent.friend
+    val same = i > 0 && fs[0].mine == f.mine
+    fun shift(c: Long) = if (!same) c.toInt() else FloatArray(3).let { hsv ->
+        android.graphics.Color.colorToHSV(c.toInt(), hsv); hsv[0] = (hsv[0] + 55) % 360; android.graphics.Color.HSVToColor(hsv)
+    }
+    shift(a.light) to shift(a.dark)
+}
+
+/** A flight's line color as a Glance color (light and dark). */
+private fun hueProvider(h: Pair<Int, Int>) = DayNight(Color(h.first), Color(h.second))
+
+/**
+ * The map behind the widget: land faint enough to read text over, the radar, and each flight's great circle (flown
+ * part solid, the rest faded) in its color with the plane at its position, all fitted into the band between [top] and
+ * [bottom] (fractions of the height). Glance can't draw, so this is a bitmap sized to the widget.
+ */
+private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, top: Float, bottom: Float): android.graphics.Bitmap? {
     val density = ctx.resources.displayMetrics.density
+    val night = isNight(ctx)
+    // Once there's a recorded path (Track.kt), the line is that, then the plan from the plane on; split at the plane.
+    // Every arc is unwrapped around the first one's start, so routes across the date line stay together.
+    var ref: Double? = null
+    class Line(val f: Flight, val arc: List<Pair<Double, Double>>, val color: Int, val flown: Int)
+    val lines = fs.zip(hues(fs)).mapNotNull { (f, hue) ->
+        val o = f.origin ?: return@mapNotNull null
+        val d = f.dest ?: return@mapNotNull null
+        val r = ref ?: o.lon.also { ref = it }
+        val mp = f.paths(emptyList(), emptyList(), 0)
+        val arc = unwrap(if (mp.flown.size < 2) greatCircle(o.lat, o.lon, d.lat, d.lon, 96).map { Pt(it.first, it.second) } else mp.flown + mp.rest.drop(1), r)
+        Line(f, arc, if (night) hue.second else hue.first, mp.flown.size)
+    }
+    if (lines.isEmpty()) return null
     val w = (wDp * density).roundToInt().coerceIn(1, 1400)
     val h = (hDp * density).roundToInt().coerceIn(1, 1400)
-    val night = isNight(ctx)
     val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
     val c = android.graphics.Canvas(bmp)
-    // Once there's a recorded path (Track.kt), the line is that, then the plan from the plane on; split at the plane.
-    val mp = f.paths(emptyList(), emptyList(), 0)
-    val flown = mp.flown.size
-    val arc = if (flown < 2) greatCircle(o.lat, o.lon, d.lat, d.lon, 96) else unwrap(mp.flown + mp.rest.drop(1), o.lon)
 
-    // Fit the arc into a band in the middle, leaving the top row and the big countdown readable.
-    val top = h * 0.30f
-    val bottom = h * (if (large) 0.46f else 0.56f)
-    val left = w * 0.10f
-    val right = w * 0.90f
-    val lonMin = arc.minOf { it.second }; val lonMax = arc.maxOf { it.second }
-    val latMin = arc.minOf { it.first }; val latMax = arc.maxOf { it.first }
+    // Fit every arc into the band, leaving the text readable.
+    val all = lines.flatMap { it.arc }
+    val t = h * top; val b = h * bottom
+    val left = w * 0.10f; val right = w * 0.90f
+    val lonMin = all.minOf { it.second }; val lonMax = all.maxOf { it.second }
+    val latMin = all.minOf { it.first }; val latMax = all.maxOf { it.first }
     val kx = kotlin.math.cos(Math.toRadians((latMin + latMax) / 2))
     val spanLon = maxOf(lonMax - lonMin, 6.0) * kx
     val spanLat = maxOf(latMax - latMin, 3.0)
-    val scale = minOf((right - left) / spanLon, (bottom - top) / spanLat)
+    val scale = minOf((right - left) / spanLon, (b - t) / spanLat)
     val cLon = (lonMin + lonMax) / 2; val cLat = (latMin + latMax) / 2
-    val cx = (left + right) / 2; val cy = (top + bottom) / 2
+    val cx = (left + right) / 2; val cy = (t + b) / 2
     fun x(lon: Double) = (cx + (lon - cLon) * kx * scale).toFloat()
     fun y(lat: Double) = (cy - (lat - cLat) * scale).toFloat()
 
@@ -205,105 +227,141 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
         path.close()
     }
     c.drawPath(path, land)
-    RainViewer.cached(f)?.let { drawRadar(c, it, ::x, ::y) } // radar layer (RainViewer.kt), every size
+    // Radar layer (RainViewer.kt), so storms along either route show; one picture per area.
+    fs.mapNotNull { RainViewer.cached(it) }.distinct().forEach { drawRadar(c, it, ::x, ::y) }
 
-    val phase = f.phase()
-    val p = when {
-        phase >= Phase.Arrival -> 1.0
-        phase == Phase.InFlight -> f.progress()
-        else -> 0.0
-    }
-    val split = (if (flown >= 2) flown - 1 else (p * (arc.size - 1)).roundToInt()).coerceIn(0, arc.size - 1)
-    val blue = (if (f.mine) Accent.mine else Accent.friend).let { if (night) it.dark else it.light }.toInt() // mine or friends' color
     val stroke = 3.2f * density
-    fun line(from: Int, to: Int, paint: android.graphics.Paint) {
-        if (to <= from) return
-        val lp = android.graphics.Path()
-        lp.moveTo(x(arc[from].second), y(arc[from].first))
-        for (i in from + 1..to) lp.lineTo(x(arc[i].second), y(arc[i].first))
-        c.drawPath(lp, paint)
-    }
     val base = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.STROKE; strokeWidth = stroke; strokeCap = android.graphics.Paint.Cap.ROUND
     }
-    line(split, arc.size - 1, android.graphics.Paint(base).apply {
-        color = blue; alpha = 90; pathEffect = android.graphics.DashPathEffect(floatArrayOf(2 * stroke, 1.6f * stroke), 0f)
-    })
-    line(0, split, android.graphics.Paint(base).apply { color = blue })
-
     val dot = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-    for ((la, lo) in listOf(arc.first(), arc.last())) {
-        dot.color = if (night) 0xFF1C1C1E.toInt() else android.graphics.Color.WHITE
-        c.drawCircle(x(lo), y(la), 5.5f * density, dot)
-        dot.color = blue
-        c.drawCircle(x(lo), y(la), 3.8f * density, dot)
-    }
-    // Airport codes next to the ends of the line.
     val label = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = if (night) 0xB3FFFFFF.toInt() else 0x99000000.toInt(); textSize = 11 * density
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
     }
-    val a0 = arc.first(); val a1 = arc.last()
-    val leftEnd = x(a0.second) <= x(a1.second)
-    label.textAlign = if (leftEnd) android.graphics.Paint.Align.RIGHT else android.graphics.Paint.Align.LEFT
-    c.drawText(f.from, x(a0.second) + (if (leftEnd) -9 else 9) * density, y(a0.first) + 4 * density, label)
-    label.textAlign = if (leftEnd) android.graphics.Paint.Align.LEFT else android.graphics.Paint.Align.RIGHT
-    c.drawText(f.to, x(a1.second) + (if (leftEnd) 9 else -9) * density, y(a1.first) + 4 * density, label)
-
-    if (phase == Phase.InFlight) {
-        val a = arc[maxOf(0, split - 1)]; val b = arc[minOf(arc.size - 1, split + 1)]
-        val bearing = Math.toDegrees(kotlin.math.atan2((x(b.second) - x(a.second)).toDouble(), -(y(b.first) - y(a.first)).toDouble())).toFloat()
-        val px = x(arc[split].second); val py = y(arc[split].first)
-        val s = 22 * density
-        dot.color = if (night) 0xFF1C1C1E.toInt() else android.graphics.Color.WHITE
-        c.drawCircle(px, py, s * 0.62f, dot)
-        androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_plane)?.mutate()?.let { dr ->
-            dr.setTint(blue)
-            c.save(); c.rotate(bearing, px, py)
-            dr.setBounds((px - s / 2).toInt(), (py - s / 2).toInt(), (px + s / 2).toInt(), (py + s / 2).toInt())
-            dr.draw(c); c.restore()
+    val ground = if (night) 0xFF1C1C1E.toInt() else android.graphics.Color.WHITE
+    for (l in lines) {
+        val f = l.f; val arc = l.arc
+        val phase = f.phase()
+        val p = when {
+            phase >= Phase.Arrival -> 1.0
+            phase == Phase.InFlight -> f.progress()
+            else -> 0.0
+        }
+        val split = (if (l.flown >= 2) l.flown - 1 else (p * (arc.size - 1)).roundToInt()).coerceIn(0, arc.size - 1)
+        fun draw(from: Int, to: Int, paint: android.graphics.Paint) {
+            if (to <= from) return
+            val lp = android.graphics.Path()
+            lp.moveTo(x(arc[from].second), y(arc[from].first))
+            for (i in from + 1..to) lp.lineTo(x(arc[i].second), y(arc[i].first))
+            c.drawPath(lp, paint)
+        }
+        draw(split, arc.size - 1, android.graphics.Paint(base).apply {
+            color = l.color; alpha = 110; pathEffect = android.graphics.DashPathEffect(floatArrayOf(2 * stroke, 1.6f * stroke), 0f)
+        })
+        draw(0, split, android.graphics.Paint(base).apply { color = l.color })
+        for ((la, lo) in listOf(arc.first(), arc.last())) {
+            dot.color = ground; c.drawCircle(x(lo), y(la), 5.5f * density, dot)
+            dot.color = l.color; c.drawCircle(x(lo), y(la), 3.8f * density, dot)
+        }
+        // Airport codes next to the ends of the line.
+        val a0 = arc.first(); val a1 = arc.last()
+        val leftEnd = x(a0.second) <= x(a1.second)
+        label.textAlign = if (leftEnd) android.graphics.Paint.Align.RIGHT else android.graphics.Paint.Align.LEFT
+        c.drawText(f.from, x(a0.second) + (if (leftEnd) -9 else 9) * density, y(a0.first) + 4 * density, label)
+        label.textAlign = if (leftEnd) android.graphics.Paint.Align.LEFT else android.graphics.Paint.Align.RIGHT
+        c.drawText(f.to, x(a1.second) + (if (leftEnd) 9 else -9) * density, y(a1.first) + 4 * density, label)
+        if (phase == Phase.InFlight) {
+            val a = arc[maxOf(0, split - 1)]; val bb = arc[minOf(arc.size - 1, split + 1)]
+            val bearing = Math.toDegrees(kotlin.math.atan2((x(bb.second) - x(a.second)).toDouble(), -(y(bb.first) - y(a.first)).toDouble())).toFloat()
+            val px = x(arc[split].second); val py = y(arc[split].first)
+            val s = 22 * density
+            dot.color = ground; c.drawCircle(px, py, s * 0.62f, dot)
+            androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_plane)?.mutate()?.let { dr ->
+                dr.setTint(l.color)
+                c.save(); c.rotate(bearing, px, py)
+                dr.setBounds((px - s / 2).toInt(), (py - s / 2).toInt(), (px + s / 2).toInt(), (py + s / 2).toInt())
+                dr.draw(c); c.restore()
+            }
         }
     }
     return bmp
 }
 
 /**
- * The widget: the route bitmap behind, then the small or wide layout by size, or an empty state. Tapping it opens the
- * flight.
+ * The widget, by size: small and wide show one flight on its map; large (wide and about three rows) shows two flights'
+ * routes on one map, each in its own hue, with a row for each below: the first in line fixed, the other taking turns.
+ * Tapping a flight opens it.
  */
 @Composable
 internal fun WidgetContent(ctx: Context) {
     val size = LocalSize.current
     val wide = size.width >= FlightWidget.WIDE.width
-    val tall = wide && size.height >= FlightWidget.TALL.height
-    val fs = widgetFlights(stacked = tall)
-    if (fs.size == 2) Column(GlanceModifier.fillMaxSize()) {
-        // Tall: two flights stacked, the top one fixed and the bottom one taking turns.
-        val h = (size.height.value - 8) / 2
-        Panel(ctx, fs[0], size.width.value, h, wide = true, large = false, next = null, GlanceModifier.defaultWeight())
-        Spacer(GlanceModifier.height(8.dp))
-        Panel(ctx, fs[1], size.width.value, h, wide = true, large = false, next = nextAction(stacked = true), GlanceModifier.defaultWeight())
-    } else {
-        val large = wide && size.height >= FlightWidget.LARGE.height
-        Panel(ctx, fs.firstOrNull(), size.width.value, size.height.value, wide, large, nextAction(stacked = false), GlanceModifier.fillMaxSize())
-    }
-}
-
-/** One flight on its route bitmap, in the small or wide layout (or the empty state); tapping it opens the flight. */
-@Composable
-private fun Panel(ctx: Context, f: Flight?, wDp: Float, hDp: Float, wide: Boolean, large: Boolean, next: Action?, modifier: GlanceModifier) {
-    val open = Intent(ctx, MainActivity::class.java).apply { if (f != null) putExtra("flight", f.id) }
-    Box(modifier.fillMaxWidth().background(W.glass).cornerRadius(24.dp).clickable(actionStartActivity(open))) {
-        if (f != null) routeBitmap(ctx, f, wDp, hDp, large)?.let {
+    val large = wide && size.height >= FlightWidget.LARGE.height
+    val fs = widgetFlights(stacked = large)
+    val first = fs.firstOrNull()
+    val open = Intent(ctx, MainActivity::class.java).apply { if (first != null) putExtra("flight", first.id) }
+    Box(GlanceModifier.fillMaxSize().background(W.glass).cornerRadius(24.dp).clickable(actionStartActivity(open))) {
+        // The map band: high when two rows of text sit below it, mid-height otherwise.
+        val (top, bottom) = when {
+            fs.size == 2 -> 0.07f to 0.48f
+            large -> 0.24f to 0.60f
+            else -> 0.30f to 0.56f
+        }
+        if (fs.isNotEmpty()) routeBitmap(ctx, fs, size.width.value, size.height.value, top, bottom)?.let {
             Image(ImageProvider(it), null, GlanceModifier.fillMaxSize(), contentScale = androidx.glance.layout.ContentScale.FillBounds)
         }
         Box(GlanceModifier.fillMaxSize().padding(if (wide) 16.dp else 14.dp)) {
             when {
-                f == null -> Empty()
-                wide -> Wide(f, weather = large, next)
-                else -> Small(f, next)
+                first == null -> Empty()
+                fs.size == 2 -> Column(GlanceModifier.fillMaxSize()) {
+                    val h = hues(fs)
+                    Spacer(GlanceModifier.defaultWeight())
+                    FlightRow(ctx, fs[0], h[0], next = null)
+                    Spacer(GlanceModifier.height(8.dp))
+                    FlightRow(ctx, fs[1], h[1], nextAction(stacked = true))
+                }
+                wide -> Wide(first, nextAction(stacked = false))
+                else -> Small(first, nextAction(stacked = false))
             }
         }
+    }
+}
+
+/**
+ * One flight in the large widget: a bar in its route's color, airline, whose and which flight, its status or details,
+ * and the countdown. Tapping it opens the flight.
+ */
+@Composable
+private fun FlightRow(ctx: Context, f: Flight, hue: Pair<Int, Int>, next: Action?) {
+    val now = Instant.now()
+    val (title, big) = headline(f, now)
+    val (status, tone) = f.status(now)
+    val open = Intent(ctx, MainActivity::class.java).putExtra("flight", f.id)
+    Row(
+        GlanceModifier.fillMaxWidth().background(W.fill).cornerRadius(14.dp).padding(horizontal = 10.dp, vertical = 8.dp)
+            .clickable(actionStartActivity(open)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(GlanceModifier.width(4.dp).height(34.dp).background(hueProvider(hue)).cornerRadius(2.dp)) {}
+        Spacer(GlanceModifier.width(8.dp))
+        AirlineChip(f)
+        Spacer(GlanceModifier.width(8.dp))
+        Column(GlanceModifier.defaultWeight()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Who(f)
+                Text("${f.label} · ${f.dest?.city ?: f.to}", style = TextStyle(color = W.label, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+            }
+            Text(
+                listOf(status, detailLine(f)).filter { it.isNotEmpty() }.joinToString(" · "),
+                style = TextStyle(color = toneProvider(tone), fontSize = 12.sp), maxLines = 1,
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(title, style = TextStyle(color = W.secondary, fontSize = 11.sp), maxLines = 1)
+            Text(big, style = TextStyle(color = hueProvider(hue), fontSize = 18.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+        }
+        NextButton(next)
     }
 }
 
@@ -368,12 +426,9 @@ private fun Small(f: Flight, next: Action?) {
     }
 }
 
-/**
- * The wide widget: flight, city and status on top, the big countdown, both ends' times and details; [weather] (the
- * large size) adds both ends' weather.
- */
+/** The wide widget: flight, city and status on top, the big countdown, both ends' times and details. */
 @Composable
-private fun Wide(f: Flight, weather: Boolean, next: Action?) {
+private fun Wide(f: Flight, next: Action?) {
     val now = Instant.now()
     val (title, big) = headline(f, now)
     val phase = f.phase(now)
@@ -411,23 +466,5 @@ private fun Wide(f: Flight, weather: Boolean, next: Action?) {
                 }
             }
         }
-        if (weather && (f.depWx != null || f.arrWx != null)) {
-            Spacer(GlanceModifier.height(12.dp))
-            Row(GlanceModifier.fillMaxWidth().background(W.fill).cornerRadius(14.dp).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                WeatherHalf(f.from, f.depWx, GlanceModifier.defaultWeight())
-                WeatherHalf(f.to, f.arrWx, GlanceModifier.defaultWeight())
-            }
-        }
-    }
-}
-
-/** One airport's weather in the large widget. */
-@Composable
-private fun WeatherHalf(code: String, w: Wx?, modifier: GlanceModifier) = Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-    Text(w?.icon() ?: "", style = TextStyle(fontSize = 22.sp))
-    Spacer(GlanceModifier.width(8.dp))
-    Column {
-        Text(w?.temp() ?: "—", style = TextStyle(color = W.label, fontSize = 16.sp, fontWeight = FontWeight.Bold))
-        Text("$code · ${w?.desc() ?: ""}", style = TextStyle(color = W.secondary, fontSize = 11.sp), maxLines = 1)
     }
 }

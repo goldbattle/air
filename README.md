@@ -30,8 +30,8 @@ yourself.
 - A passport view: every past flight on a map, with miles, time in the air, top airports/airlines/routes/aircraft,
   and a year in review (estimated CO₂, on-time rate, busiest month, new airports, the year before).
 - A home screen widget with the route map, radar and a countdown. It takes turns between your upcoming flights and
-  friends', and stays on yours once you're under way (› peeks at the others). Stretched to about four rows it shows
-  two: yours on top, friends' taking turns below.
+  friends', and stays on yours once you're under way (› peeks at the others). At three rows it shows two flights'
+  routes on one map, each in its own color, yours fixed on top and the others taking turns below.
 - Pick a color for your flights and one for friends' (Settings › About): routes, cards, the widget and the passport.
 
 ## Install

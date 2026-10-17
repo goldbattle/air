@@ -64,11 +64,11 @@ class NextLiveReceiver : BroadcastReceiver() {
 
 /** Home screen widget: the next (or current) flight, in the style of the iOS system widgets. */
 class FlightWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, LARGE, TALL))
+    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, LARGE))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Radar layer (RainViewer.kt): fetched here when due, then drawn from memory.
-        if (Layers.radar) widgetFlight()?.let { f -> kotlinx.coroutines.withTimeoutOrNull(20_000) { RainViewer.get(f) } }
+        if (Layers.radar) widgetFlights(stacked = true).forEach { f -> kotlinx.coroutines.withTimeoutOrNull(20_000) { RainViewer.get(f) } }
         provideContent { WidgetContent(context) }
     }
 
@@ -76,8 +76,7 @@ class FlightWidget : GlanceAppWidget() {
     companion object {
         val SMALL = DpSize(150.dp, 150.dp)
         val WIDE = DpSize(300.dp, 150.dp)
-        val LARGE = DpSize(300.dp, 250.dp) // wide and tall: adds the weather
-        val TALL = DpSize(300.dp, 330.dp) // about four rows: two flights stacked
+        val LARGE = DpSize(300.dp, 250.dp) // wide and about three rows: two flights on one map
 
         /**
          * Redraws every placed copy of the widget: after each save, and on each background check since countdowns move.
