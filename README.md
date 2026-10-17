@@ -13,7 +13,8 @@ yourself.
 
 - Live tracking for your own flights and friends', with gate, delay, and takeoff/landing notifications.
 - A live notification that follows each flight: a countdown with the time to leave, boarding and the gate at the
-  airport, then progress, speed and landing time in the air.
+  airport, then progress, speed and landing time in the air. Each of yours gets its own card; friends' share one
+  ("2 of 3") with a Next flight button. Switch them on or off separately in Settings › Notifications.
 - A flight page with a route map, schedule, weather at both ends, your plane's previous flight, and (while airborne)
   speed, altitude and heading. Connecting flights show as one journey.
 - Map layers: radar, forecast radar for US takeoffs, weather along the route, and the paths earlier flights took.
@@ -29,7 +30,8 @@ yourself.
 - A passport view: every past flight on a map, with miles, time in the air, top airports/airlines/routes/aircraft,
   and a year in review (estimated CO₂, on-time rate, busiest month, new airports, the year before).
 - A home screen widget with the route map, radar and a countdown. It takes turns between your upcoming flights and
-  friends', and stays on yours once it's in the air or within two days.
+  friends', and stays on yours once you're under way (› peeks at the others). Stretched to about four rows it shows
+  two: yours on top, friends' taking turns below.
 - Pick a color for your flights and one for friends' (Settings › About): routes, cards, the widget and the passport.
 
 ## Install

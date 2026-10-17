@@ -1,5 +1,6 @@
 package com.aria.air
 
+import com.aria.air.background.*
 import com.aria.air.data.*
 import com.aria.air.ui.screens.*
 import com.aria.air.ui.widget.*
@@ -138,13 +139,35 @@ class FormatTest : AirTest() {
             val bob = flight(hours(24 * 30)).copy(id = "bob", friend = "Bob")
             Store.flights += listOf(ann, bob)
             assertEquals(setOf("ann", "bob"), shown().toSet())
-            // Mine two weeks out: mine and friends' alternate.
-            Store.flights += flight(hours(24 * 14)).copy(id = "me")
-            assertEquals(4, shown().count { it == "me" })
-            // Mine tomorrow: mine three turns in four.
-            Store.flights.removeAll { it.id == "me" }
+            // Mine tomorrow: mine and friends' alternate.
             Store.flights += flight(hours(24)).copy(id = "me")
-            assertEquals(6, shown().count { it == "me" })
+            assertEquals(4, shown().count { it == "me" })
+            // Mine in two hours (at the airport): always mine, even with friends flying in.
+            Store.flights.removeAll { it.id == "me" }
+            Store.flights += flight(hours(2)).copy(id = "me")
+            assertEquals(8, shown().count { it == "me" })
+            // Tall: mine fixed on top, friends taking turns below.
+            assertEquals(setOf(listOf("me", "ann"), listOf("me", "bob")), slots.map { t -> widgetFlights(true, t).map { it.id } }.toSet())
+            // Next shows a friend's for one turn, then mine again.
+            Turns.next("widget", Store.flights.toList(), NOW, Duration.ofMinutes(30))
+            assertEquals("ann", widgetFlight(NOW.plus(min(29)))?.id)
+            assertEquals("me", widgetFlight(NOW.plus(min(31)))?.id)
+        } finally {
+            Store.flights.clear()
+            Prefs["pick:widget"] = ""
+        }
+    }
+
+    @Test
+    fun friendsShareOneLiveCard() {
+        Store.flights.clear()
+        try {
+            Store.flights += listOf(
+                flight(hours(2)).copy(id = "me"), flight(hours(1)).copy(id = "ann", friend = "Ann"),
+                flight(hours(-1)).copy(id = "bob", friend = "Bob"),
+            )
+            // Mine isn't in the friends' rotation; Bob, in the air, comes first.
+            assertEquals(listOf("bob", "ann"), Notify.friendsLive(NOW).map { it.id })
         } finally {
             Store.flights.clear()
         }

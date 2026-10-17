@@ -38,8 +38,8 @@ class TrackerTest : AirTest() {
     fun ongoingNotificationWindow() {
         assertFalse(Notify.wantsLive(flight(hours(13)), NOW))
         assertTrue(Notify.wantsLive(flight(hours(11)), NOW))                          // mine: 12 h ahead by default
-        assertFalse(Notify.wantsLive(flight(hours(4)).copy(friend = "Sam"), NOW))
-        assertTrue(Notify.wantsLive(flight(hours(2)).copy(friend = "Sam"), NOW))      // friends: 3 h
+        assertFalse(Notify.wantsLive(flight(hours(13)).copy(friend = "Sam"), NOW))
+        assertTrue(Notify.wantsLive(flight(hours(9)).copy(friend = "Sam"), NOW))      // friends: the same 12 h
         assertTrue(Notify.wantsLive(flight(hours(-1)), NOW))                          // in the air
         assertTrue(Notify.wantsLive(flight(min(-330)), NOW))                          // just landed
         assertFalse(Notify.wantsLive(flight(hours(-8)), NOW))

@@ -25,6 +25,23 @@ object Notify {
     private const val LIVE = "live"
     private const val ALERTS = "alerts"
 
+    /**
+     * Each of my live flights has its own card, always there. Friends' share one card ("2 of 3"): they take turns on
+     * it every [TURN], or on its Next flight button.
+     */
+    private const val FRIENDS_ID = 1
+    val TURN: Duration = Duration.ofMinutes(10)
+
+    /** Friends' flights wanting a live card now, in turn order, and the one whose turn it is. */
+    fun friendsLive(now: Instant) = turnOrder(Store.flights.filter { !it.mine && wantsLive(it, now) }, now)
+    private fun friendStar(now: Instant) = Turns.showing("live", friendsLive(now), now, TURN)
+
+    /** Redraws the friends' card with whoever's turn it is (after Next flight). */
+    fun liveNow(ctx: Context) {
+        val star = friendStar(Instant.now(clock))
+        if (star == null) ctx.getSystemService(NotificationManager::class.java).cancel(FRIENDS_ID) else live(ctx, star)
+    }
+
     /** Creates the two channels, quiet live progress and high-priority alerts. Safe to call on every start. */
     fun channels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -62,8 +79,8 @@ object Notify {
     private fun alertsEnabled(f: Flight) = Prefs.flag(if (f.mine) "alertsMine" else "alertsFriends")
 
     /**
-     * Whether a flight gets the ongoing notification now: my flights from [Prefs.liveLeadHours] before departure (once
-     * the time is known), friends' from 3 hours before, both through the air and until an hour after landing.
+     * Whether a flight gets the ongoing notification now: from [Prefs.liveLeadHours] before departure (once the time is
+     * known), mine and friends' alike (friends share one card), through the air and until an hour after landing.
      */
     fun wantsLive(f: Flight, now: Instant = Instant.now(clock)): Boolean {
         if (!liveEnabled(f) || f.cancelled) return false
@@ -71,7 +88,7 @@ object Notify {
         if (phase == Phase.InFlight || phase == Phase.Arrival) return true
         if (phase == Phase.Done) return false
         val dep = f.dep ?: return false
-        return Duration.between(now, dep) <= Duration.ofHours(if (f.mine) Prefs.liveLeadHours.toLong() else 3)
+        return Duration.between(now, dep) <= Duration.ofHours(Prefs.liveLeadHours.toLong())
     }
 
     /**
@@ -83,11 +100,14 @@ object Notify {
      */
     fun live(ctx: Context, f: Flight) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        val id = f.id.hashCode()
         val now = Instant.now(clock)
-        if (!wantsLive(f, now)) {
-            nm.cancel(id); return
+        val id = if (f.mine) f.id.hashCode() else FRIENDS_ID
+        val star = if (f.mine) f else friendStar(now)
+        if (!wantsLive(f, now) || star == null) {
+            if (f.mine || star == null) nm.cancel(id)
+            return
         }
+        if (star.id != f.id) return // another friend's turn on the shared card
         val phase = f.phase(now)
         val flying = phase == Phase.InFlight
         val landed = phase == Phase.Arrival
@@ -135,7 +155,7 @@ object Notify {
             .setOngoing(!landed)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_PROGRESS)
-            .setGroup("live-${f.id}") // its own card, not bundled with alerts
+            .setGroup(if (f.mine) "live-${f.id}" else "live-friends") // its own card, not bundled with alerts
             // Flight times aren't private: show the full card on the lock screen even when content is hidden.
             .setVisibility(Notification.VISIBILITY_PUBLIC)
         // At the airport (before takeoff, or after landing) the terminal map is a tap away, when it's on the phone.
@@ -165,11 +185,16 @@ object Notify {
             b.setStyle(Notification.BigTextStyle().bigText(text))
         }
         try {
-            // One flight at a time gets the status bar chip; with several live, they take turns (the rest stay in the
-            // shade). Each run of the background check (every few minutes while live) moves it along.
-            val star = takingTurns(Store.flights.filter { wantsLive(it, now) && it.phase(now) != Phase.Arrival }, now, Duration.ofMinutes(10))
-            b.setRequestPromotedOngoing(!landed && star?.id == f.id).setShortCriticalText(chip)
+            // The status bar chip is mine whenever I have a live flight.
+            b.setRequestPromotedOngoing(!landed && (f.mine || Store.flights.none { it.mine && wantsLive(it, now) })).setShortCriticalText(chip)
         } catch (_: LinkageError) {
+        }
+        // Several friends live: which one this is, and a button to the next.
+        val friends = if (f.mine) emptyList() else friendsLive(now)
+        if (friends.size > 1) {
+            b.setSubText("${friends.indexOf(f) + 1} of ${friends.size} friends' flights")
+            val next = PendingIntent.getBroadcast(ctx, 0, Intent(ctx, NextLiveReceiver::class.java), PendingIntent.FLAG_IMMUTABLE)
+            b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_plane), "Next flight", next).build())
         }
         nm.notify(id, b.build())
     }
@@ -177,7 +202,9 @@ object Notify {
     /** Removes live cards of flights that no longer want one (finished, deleted, or switched off). */
     fun cleanup(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        val keep = Store.flights.filter { wantsLive(it) }.map { it.id.hashCode() }.toSet()
+        val now = Instant.now(clock)
+        val keep = Store.flights.filter { it.mine && wantsLive(it, now) }.map { it.id.hashCode() }.toSet() +
+            (if (friendStar(now) != null) setOf(FRIENDS_ID) else emptySet())
         nm.activeNotifications.filter { it.notification.channelId == LIVE && it.id !in keep }.forEach { nm.cancel(it.id) }
     }
 

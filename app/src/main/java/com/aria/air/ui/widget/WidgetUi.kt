@@ -20,7 +20,13 @@ import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
+import androidx.glance.GlanceId
+import androidx.glance.action.Action
+import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.background
@@ -60,9 +66,51 @@ private object W {
     val red = DayNight(Color(0xFFFF3B30), Color(0xFFFF453A))
 }
 
-/** The flight the widget shows: my upcoming flights and friends' take turns by half hour (see [takingTurns]). */
-internal fun widgetFlight(now: Instant = Instant.now(clock)): Flight? =
-    takingTurns(Store.flights.filter { it.upcoming }, now, Duration.ofMinutes(30))
+/** How long the widget shows one flight before the next: about one background check. */
+private val WIDGET_TURN: Duration = Duration.ofMinutes(30)
+
+private fun upcoming() = Store.flights.filter { it.upcoming }
+
+/** The flights that take turns in the widget: all of them, or ([stacked]) all but the one fixed on top. */
+private fun rotating(stacked: Boolean, now: Instant) = turnOrder(upcoming(), now).let { if (stacked) it.drop(1) else it }
+
+/**
+ * What the widget shows: one flight taking turns ([takingTurns]: my active flight always), or, [stacked] when the
+ * widget is tall, the first in line fixed on top (my next flight, if any) and the others taking turns below it.
+ */
+internal fun widgetFlights(stacked: Boolean, now: Instant = Instant.now(clock)): List<Flight> {
+    val top = if (stacked) turnOrder(upcoming(), now).firstOrNull() ?: return emptyList() else null
+    return listOfNotNull(top, Turns.showing("widget", rotating(stacked, now), now, WIDGET_TURN))
+}
+
+/** The flight the widget shows first (for the radar fetch). */
+internal fun widgetFlight(now: Instant = Instant.now(clock)): Flight? = widgetFlights(false, now).firstOrNull()
+
+private val STACKED = ActionParameters.Key<Boolean>("stacked")
+
+/** The widget's › button: on to the next flight in turn (below the fixed one, when stacked). */
+class NextWidgetFlight : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val now = Instant.now(clock)
+        Turns.next("widget", rotating(parameters[STACKED] == true, now), now, WIDGET_TURN)
+        FlightWidget.refresh(context)
+    }
+}
+
+/** The › action, or null when there's nothing else to show. */
+private fun nextAction(stacked: Boolean): Action? =
+    if (rotating(stacked, Instant.now(clock)).size < 2) null else actionRunCallback<NextWidgetFlight>(actionParametersOf(STACKED to stacked))
+
+/** ›: shows the next flight. */
+@Composable
+private fun NextButton(next: Action?) {
+    if (next == null) return
+    Spacer(GlanceModifier.width(6.dp))
+    Box(
+        GlanceModifier.size(24.dp).background(W.fill).cornerRadius(12.dp).clickable(next),
+        contentAlignment = Alignment.Center,
+    ) { Text("›", style = TextStyle(color = W.label, fontSize = 16.sp, fontWeight = FontWeight.Bold)) }
+}
 
 /** The flight's color from Settings: mine or friends'. */
 private fun accent(f: Flight) = (if (f.mine) Accent.mine else Accent.friend).let { DayNight(Color(it.light), Color(it.dark)) }
@@ -225,20 +273,35 @@ private fun routeBitmap(ctx: Context, f: Flight, wDp: Float, hDp: Float, large: 
  */
 @Composable
 internal fun WidgetContent(ctx: Context) {
-    val f = widgetFlight()
-    val open = Intent(ctx, MainActivity::class.java).apply { if (f != null) putExtra("flight", f.id) }
     val size = LocalSize.current
     val wide = size.width >= FlightWidget.WIDE.width
-    val large = wide && size.height >= FlightWidget.LARGE.height
-    Box(GlanceModifier.fillMaxSize().background(W.glass).cornerRadius(24.dp).clickable(actionStartActivity(open))) {
-        if (f != null) routeBitmap(ctx, f, size.width.value, size.height.value, large)?.let {
+    val tall = wide && size.height >= FlightWidget.TALL.height
+    val fs = widgetFlights(stacked = tall)
+    if (fs.size == 2) Column(GlanceModifier.fillMaxSize()) {
+        // Tall: two flights stacked, the top one fixed and the bottom one taking turns.
+        val h = (size.height.value - 8) / 2
+        Panel(ctx, fs[0], size.width.value, h, wide = true, large = false, next = null, GlanceModifier.defaultWeight())
+        Spacer(GlanceModifier.height(8.dp))
+        Panel(ctx, fs[1], size.width.value, h, wide = true, large = false, next = nextAction(stacked = true), GlanceModifier.defaultWeight())
+    } else {
+        val large = wide && size.height >= FlightWidget.LARGE.height
+        Panel(ctx, fs.firstOrNull(), size.width.value, size.height.value, wide, large, nextAction(stacked = false), GlanceModifier.fillMaxSize())
+    }
+}
+
+/** One flight on its route bitmap, in the small or wide layout (or the empty state); tapping it opens the flight. */
+@Composable
+private fun Panel(ctx: Context, f: Flight?, wDp: Float, hDp: Float, wide: Boolean, large: Boolean, next: Action?, modifier: GlanceModifier) {
+    val open = Intent(ctx, MainActivity::class.java).apply { if (f != null) putExtra("flight", f.id) }
+    Box(modifier.fillMaxWidth().background(W.glass).cornerRadius(24.dp).clickable(actionStartActivity(open))) {
+        if (f != null) routeBitmap(ctx, f, wDp, hDp, large)?.let {
             Image(ImageProvider(it), null, GlanceModifier.fillMaxSize(), contentScale = androidx.glance.layout.ContentScale.FillBounds)
         }
         Box(GlanceModifier.fillMaxSize().padding(if (wide) 16.dp else 14.dp)) {
             when {
                 f == null -> Empty()
-                wide -> Wide(f, weather = large)
-                else -> Small(f)
+                wide -> Wide(f, weather = large, next)
+                else -> Small(f, next)
             }
         }
     }
@@ -278,7 +341,7 @@ internal fun detailLine(f: Flight): String {
 
 /** The small widget: the flight, the big countdown, and the time or what's next. */
 @Composable
-private fun Small(f: Flight) {
+private fun Small(f: Flight, next: Action?) {
     val now = Instant.now()
     val (title, big) = headline(f, now)
     val flying = f.phase(now) == Phase.InFlight
@@ -290,7 +353,9 @@ private fun Small(f: Flight) {
             Text(
                 f.label,
                 style = TextStyle(color = W.label, fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1,
+                modifier = GlanceModifier.defaultWeight(),
             )
+            NextButton(next)
         }
         Spacer(GlanceModifier.defaultWeight())
         Text(title, style = TextStyle(color = W.secondary, fontSize = 12.sp, fontWeight = FontWeight.Medium), maxLines = 1)
@@ -308,7 +373,7 @@ private fun Small(f: Flight) {
  * large size) adds both ends' weather.
  */
 @Composable
-private fun Wide(f: Flight, weather: Boolean) {
+private fun Wide(f: Flight, weather: Boolean, next: Action?) {
     val now = Instant.now()
     val (title, big) = headline(f, now)
     val phase = f.phase(now)
@@ -324,6 +389,7 @@ private fun Wide(f: Flight, weather: Boolean) {
                 modifier = GlanceModifier.defaultWeight(),
             )
             Text(status, style = TextStyle(color = toneProvider(tone), fontSize = 13.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+            NextButton(next)
         }
         Spacer(GlanceModifier.defaultWeight())
         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {

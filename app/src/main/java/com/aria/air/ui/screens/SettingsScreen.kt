@@ -177,7 +177,7 @@ private fun NotificationsTab() {
             }
         }
     }
-    Footnote("In the last 4 hours a bar fills up toward boarding, so you know when to head out.")
+    Footnote("For friends' flights too, on one shared card. In the last 4 hours a bar fills up toward boarding, so you know when to head out.")
     SectionHeader("Reminder before departure")
     Group {
         Column(Modifier.padding(12.dp)) {

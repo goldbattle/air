@@ -53,9 +53,18 @@ class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) = Updater.onBroadcast(ctx, intent)
 }
 
+/** The friends' live card's Next flight button: the card moves on to the next friend's flight. */
+class NextLiveReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        val now = java.time.Instant.now(com.aria.air.util.clock)
+        Turns.next("live", Notify.friendsLive(now), now, Notify.TURN)
+        Notify.liveNow(ctx)
+    }
+}
+
 /** Home screen widget: the next (or current) flight, in the style of the iOS system widgets. */
 class FlightWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, LARGE))
+    override val sizeMode = SizeMode.Responsive(setOf(SMALL, WIDE, LARGE, TALL))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Radar layer (RainViewer.kt): fetched here when due, then drawn from memory.
@@ -68,6 +77,7 @@ class FlightWidget : GlanceAppWidget() {
         val SMALL = DpSize(150.dp, 150.dp)
         val WIDE = DpSize(300.dp, 150.dp)
         val LARGE = DpSize(300.dp, 250.dp) // wide and tall: adds the weather
+        val TALL = DpSize(300.dp, 330.dp) // about four rows: two flights stacked
 
         /**
          * Redraws every placed copy of the widget: after each save, and on each background check since countdowns move.

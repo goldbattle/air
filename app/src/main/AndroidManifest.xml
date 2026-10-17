@@ -57,6 +57,9 @@
                 android:resource="@xml/flight_widget" />
         </receiver>
         <receiver
+            android:name=".NextLiveReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".UpdateReceiver"
             android:exported="false">
             <intent-filter>

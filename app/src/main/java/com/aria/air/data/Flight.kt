@@ -121,24 +121,50 @@ val Flight.boardingLead: Duration
 /** Estimated start of boarding, or null without a departure time. */
 val Flight.boarding: Instant? get() = dep?.minus(boardingLead)
 
+/** My next few flights, then friends' (in the air first): the flights that take turns in one place, in order. */
+fun turnOrder(flights: List<Flight>, now: Instant): List<Flight> {
+    val (mine, theirs) = flights.filter { !it.cancelled }.sortedBy { it.depGuess }.partition { it.mine }
+    return mine.take(3) + theirs.sortedBy { if (it.phase(now) == Phase.InFlight) 0 else 1 }.take(4)
+}
+
+/** Whether my flight is under way for me: within the live-card lead before departure, in the air, or just landed. */
+fun Flight.active(now: Instant): Boolean {
+    val p = phase(now)
+    return p == Phase.InFlight || p == Phase.Arrival ||
+        (p != Phase.Done && Duration.between(now, depGuess) <= Duration.ofHours(Prefs.liveLeadHours.toLong()))
+}
+
 /**
- * Which of [flights] to show now, when one place (the widget, the status bar) takes turns between them, a new turn
- * every [slot]. My next flight has three turns in four once it's in the air or leaves within two days, friends'
- * the fourth; otherwise my next few flights and friends' alternate. Friends' in the air go first.
+ * Which of [flights] to show now when one place (the widget) takes turns, a new turn every [slot]. My active flight
+ * ([active]) always: it matters most at the airport, even with friends flying in. Otherwise my next few flights and
+ * friends' alternate, each cycling through its own.
  */
 fun takingTurns(flights: List<Flight>, now: Instant, slot: Duration): Flight? {
-    val (mine, theirs) = flights.filter { !it.cancelled }.sortedBy { it.depGuess }.partition { it.mine }
-    val friends = theirs.sortedBy { if (it.phase(now) == Phase.InFlight) 0 else 1 }.take(3)
+    val all = turnOrder(flights, now)
+    val (soon, friends) = all.partition { it.mine }
+    soon.firstOrNull()?.takeIf { it.active(now) }?.let { return it }
     val turn = now.epochSecond / slot.seconds
-    val next = mine.firstOrNull()
-    if (next != null && (next.phase(now) == Phase.InFlight || Duration.between(now, next.depGuess) < Duration.ofDays(2)))
-        return if (turn % 4 != 3L || friends.isEmpty()) next else friends[((turn / 4) % friends.size).toInt()]
-    val soon = mine.take(3)
-    // Alternate mine and friends' (each cycling through its own), or just whichever there is.
     val (pool, n) = when {
-        soon.isEmpty() || friends.isEmpty() -> soon + friends to turn
+        soon.isEmpty() || friends.isEmpty() -> all to turn
         turn % 2 == 0L -> soon to turn / 2
         else -> friends to turn / 2
     }
     return pool.getOrNull((n % maxOf(pool.size, 1)).toInt())
+}
+
+/** Next taps in one place ([key]: "widget", "live"): the flight tapped to stays for a whole turn, then turns go on. */
+object Turns {
+    /** What [key] shows now: the flight a Next tap picked, for one [slot] after the tap, else whose turn it is. */
+    fun showing(key: String, flights: List<Flight>, now: Instant, slot: Duration): Flight? {
+        val (at, id) = Prefs["pick:$key"].split(':', limit = 2).let { it.getOrNull(0)?.toLongOrNull() to it.getOrNull(1) }
+        if (at != null && now.epochSecond - at < slot.seconds) turnOrder(flights, now).firstOrNull { it.id == id }?.let { return it }
+        return takingTurns(flights, now, slot)
+    }
+
+    /** Moves [key] on to the flight after the one it shows. */
+    fun next(key: String, flights: List<Flight>, now: Instant, slot: Duration) {
+        val all = turnOrder(flights, now)
+        val i = all.indexOf(showing(key, flights, now, slot))
+        if (all.size > 1) Prefs["pick:$key"] = "${now.epochSecond}:${all[(i + 1) % all.size].id}"
+    }
 }
