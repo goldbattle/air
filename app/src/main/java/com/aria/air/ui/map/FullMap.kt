@@ -118,7 +118,7 @@ fun FullMap(f: Flight, pulls: Int, onClose: () -> Unit) {
                 },
         ) {
             WorldMap(
-                listOf(MapRoute(o, d, highlight = true)), Modifier.fillMaxSize(), focus = true, line = C.of(f), dot = C.of(f), plane = f.live?.takeIf { f.isAirborne }, paths = f.mapPaths(),
+                listOf(MapRoute(o, d, highlight = true)), Modifier.fillMaxSize(), focus = true, line = C.of(f), dot = C.of(f), plane = f.plane(), paths = f.mapPaths(),
                 camera = camera, onFit = { fit[0] = it },
                 under = radar?.let { r -> { x, y -> drawWeatherMap(r, x, y, 0.65f) } },
                 over = { x, y ->
@@ -183,7 +183,7 @@ private fun MapFooter(f: Flight, radar: RadarImage?, modifier: Modifier) {
             add("Past routes: $span · fetched ${ago(c.at)}")
         }
         f.updated?.let { add("Flight status · fetched ${ago(it)}") }
-        f.live?.takeIf { f.isAirborne }?.let { add("Position: ${at(it.at)} · ${ago(it.at)}") }
+        f.plane()?.let { add((if (it.estimated) "Position: estimated, last signal " else "Position: ") + "${at(it.at)} · ${ago(it.at)}") }
     }
     if (lines.isEmpty()) return
     Text(
@@ -208,5 +208,5 @@ private fun mapReport(f: Flight, radar: RadarImage?, camera: Camera?, fit: Camer
     appendLine("radar ${radar?.let { "frame ${it.frame} fetched ${it.fetched} box ${it.box} ${it.bitmap.width}x${it.bitmap.height}" } ?: "none"}")
     appendLine("route weather ${f.routeWx?.let { w -> "fetched ${w.fetched}: " + w.pts.joinToString { "${it.sky()}/${it.code}/${it.mm}mm/cape ${it.cape}" } } ?: "none"}")
     val p = f.mapPaths()
-    appendLine("paths: past ${p.typical.size} (${p.typical.joinToString { "${it.size} pts" }}), flown ${p.flown.size} pts, arc ${p.arc}, cached ${PastRoutes.cache[f.routeKey]?.let { "${it.legs.size} at ${it.at}" } ?: "none"}")
+    appendLine("paths: past ${p.typical.size} (${p.typical.joinToString { "${it.size} pts" }}), flown ${p.flown.size} pts, guessed ${p.guess.size} pts, arc ${p.arc}, cached ${PastRoutes.cache[f.routeKey]?.let { "${it.legs.size} at ${it.at}" } ?: "none"}")
 }

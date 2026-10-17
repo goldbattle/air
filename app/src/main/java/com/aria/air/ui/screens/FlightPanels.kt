@@ -207,7 +207,8 @@ internal fun InFlightPanel(f: Flight, now: Instant) {
         )
         Hairline()
         Text(
-            if (phase == Phase.InFlight) "Waiting for the plane's live signal (ADS-B via adsb.lol). Progress is estimated from the schedule until then."
+            if (phase == Phase.InFlight && f.track.isNotEmpty()) "Live signal lost ${ago(Instant.ofEpochSecond(f.track.last().t))} (ADS-B via adsb.lol). On the map the dotted line and faded plane are estimated from the schedule until it's back."
+            else if (phase == Phase.InFlight) "Waiting for the plane's live signal (ADS-B via adsb.lol). Progress is estimated from the schedule until then."
             else "Speed, altitude and position show here live while the plane is in the air.",
             fontSize = 13.sp, color = C.secondary, modifier = Modifier.padding(16.dp),
         )

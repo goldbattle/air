@@ -179,6 +179,29 @@ class FormatTest : AirTest() {
     }
 
     @Test
+    fun lostSignalEstimatesThePlane() {
+        // Took off 3 h ago, lands in 2; the last fix is 2 h old, so by now it's half-way from there to Boston.
+        val f = flight(hours(-3)).let { it.copy(depActual = it.depSched) }
+        val sfo = f.origin!!; val bos = f.dest!!
+        val p = greatCircle(sfo.lat, sfo.lon, bos.lat, bos.lon, 100)[20]
+        val at = NOW.minus(hours(2))
+        val g = f.copy(live = Live(p.first, p.second, 35000, 480, 70.0, 0, at, false), track = listOf(Pt(p.first, p.second, 35000, at.epochSecond)))
+        val est = g.plane(NOW)!!
+        assertTrue(est.estimated); assertEquals(at, est.at)
+        val left = distKm(est.lat, est.lon, bos.lat, bos.lon); val fixLeft = distKm(p.first, p.second, bos.lat, bos.lon)
+        assertEquals(0.5, left / fixLeft, 0.02)
+        // The map: solid to the last fix, dotted from there to the estimate, dashed on to Boston.
+        val mp = g.paths(emptyList(), emptyList(), 0, NOW)
+        assertEquals(Pt(p.first, p.second, 35000, at.epochSecond), mp.flown.last())
+        assertEquals(p.first, mp.guess.first().lat, 1e-6); assertEquals(est.lat, mp.guess.last().lat, 1e-6)
+        assertEquals(est.lat, mp.rest.first().lat, 1e-6); assertEquals(bos.lat, mp.rest.last().lat, 1e-6)
+        // Signal back: the real track again, nothing estimated.
+        val back = g.copy(live = Live(est.lat, est.lon, 35000, 480, 70.0, 0, NOW, false))
+        assertTrue(back.paths(emptyList(), emptyList(), 0, NOW).guess.isEmpty())
+        assertEquals(null, flight(hours(2)).plane(NOW)) // not flying yet
+    }
+
+    @Test
     fun cardAndWidgetDetails() {
         val f = flight(hours(2)).copy(depGate = "F12", seat = "21C", arrGate = "B5", baggage = "4")
         assertEquals("Gate F12 · Seat 21C", detailLine(f))

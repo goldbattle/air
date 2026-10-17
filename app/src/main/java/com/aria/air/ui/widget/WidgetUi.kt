@@ -185,14 +185,16 @@ private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, 
     // Once there's a recorded path (Track.kt), the line is that, then the plan from the plane on; split at the plane.
     // Every arc is unwrapped around the first one's start, so routes across the date line stay together.
     var ref: Double? = null
-    class Line(val f: Flight, val arc: List<Pair<Double, Double>>, val color: Int, val flown: Int)
+    // [flown] and [guess] count arc points: solid to the last fix, dotted on to the estimated plane (signal lost).
+    class Line(val f: Flight, val arc: List<Pair<Double, Double>>, val color: Int, val flown: Int, val guess: Int)
     val lines = fs.zip(hues(fs)).mapNotNull { (f, hue) ->
         val o = f.origin ?: return@mapNotNull null
         val d = f.dest ?: return@mapNotNull null
         val r = ref ?: o.lon.also { ref = it }
         val mp = f.paths(emptyList(), emptyList(), 0)
-        val arc = unwrap(if (mp.flown.size < 2) greatCircle(o.lat, o.lon, d.lat, d.lon, 96).map { Pt(it.first, it.second) } else mp.flown + mp.rest.drop(1), r)
-        Line(f, arc, if (night) hue.second else hue.first, mp.flown.size)
+        val known = if (mp.guess.isNotEmpty()) mp.flown.ifEmpty { mp.guess.take(1) } + mp.guess.drop(1) else mp.flown
+        val arc = unwrap(if (known.size < 2) greatCircle(o.lat, o.lon, d.lat, d.lon, 96).map { Pt(it.first, it.second) } else known + mp.rest.drop(1), r)
+        Line(f, arc, if (night) hue.second else hue.first, if (mp.guess.isEmpty()) mp.flown.size else maxOf(mp.flown.size, 1), maxOf(mp.guess.size - 1, 0))
     }
     if (lines.isEmpty()) return null
     val w = (wDp * density).roundToInt().coerceIn(1, 1400)
@@ -248,7 +250,8 @@ private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, 
             phase == Phase.InFlight -> f.progress()
             else -> 0.0
         }
-        val split = (if (l.flown >= 2) l.flown - 1 else (p * (arc.size - 1)).roundToInt()).coerceIn(0, arc.size - 1)
+        val solid = (if (l.flown >= 2 || l.guess > 0) l.flown - 1 else (p * (arc.size - 1)).roundToInt()).coerceIn(0, arc.size - 1)
+        val split = (solid + l.guess).coerceIn(0, arc.size - 1)
         fun draw(from: Int, to: Int, paint: android.graphics.Paint) {
             if (to <= from) return
             val lp = android.graphics.Path()
@@ -259,7 +262,10 @@ private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, 
         draw(split, arc.size - 1, android.graphics.Paint(base).apply {
             color = l.color; alpha = 110; pathEffect = android.graphics.DashPathEffect(floatArrayOf(2 * stroke, 1.6f * stroke), 0f)
         })
-        draw(0, split, android.graphics.Paint(base).apply { color = l.color })
+        draw(solid, split, android.graphics.Paint(base).apply {
+            color = l.color; pathEffect = android.graphics.DashPathEffect(floatArrayOf(0.01f, 1.8f * stroke), 0f)
+        })
+        draw(0, solid, android.graphics.Paint(base).apply { color = l.color })
         for ((la, lo) in listOf(arc.first(), arc.last())) {
             dot.color = ground; c.drawCircle(x(lo), y(la), 5.5f * density, dot)
             dot.color = l.color; c.drawCircle(x(lo), y(la), 3.8f * density, dot)
@@ -278,7 +284,7 @@ private fun routeBitmap(ctx: Context, fs: List<Flight>, wDp: Float, hDp: Float, 
             val s = 22 * density
             dot.color = ground; c.drawCircle(px, py, s * 0.62f, dot)
             androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_plane)?.mutate()?.let { dr ->
-                dr.setTint(l.color)
+                dr.setTint(l.color); if (l.guess > 0) dr.alpha = 140 // faded: only an estimate
                 c.save(); c.rotate(bearing, px, py)
                 dr.setBounds((px - s / 2).toInt(), (py - s / 2).toInt(), (px + s / 2).toInt(), (py + s / 2).toInt())
                 dr.draw(c); c.restore()

@@ -71,7 +71,7 @@ fun WorldMap(
 ) {
     val arcs = remember(routes) { routes.map { greatCircle(it.from.lat, it.from.lon, it.to.lat, it.to.lon) } }
     val ref = arcs.firstOrNull()?.first()?.second ?: 0.0
-    val extra = remember(paths, ref) { paths?.let { p -> listOf(p.flown, p.rest).plus(p.typical).map { unwrap(it, ref) } } }
+    val extra = remember(paths, ref) { paths?.let { p -> listOf(p.flown, p.rest, p.guess).plus(p.typical).map { unwrap(it, ref) } } }
     val planePainter = rememberVectorPainter(Icons.Filled.Flight)
     // Clipped: land paths extend past the viewport and would otherwise spill over whatever is below the map.
     Canvas(modifier.clipToBounds()) {
@@ -111,19 +111,23 @@ fun WorldMap(
         under?.invoke(this, ::x, ::y)
 
         val w = if (focus) 3.dp.toPx() else 1.6.dp.toPx()
-        fun stroke(pts: List<Pair<Double, Double>>, color: Color, width: Float, dash: Boolean = false) {
+        fun stroke(pts: List<Pair<Double, Double>>, color: Color, width: Float, dash: Boolean = false, dots: Boolean = false) {
             if (pts.size < 2) return
             val p = Path()
             pts.forEachIndexed { i, (la, lo) -> if (i == 0) p.moveTo(x(lo), y(la)) else p.lineTo(x(lo), y(la)) }
-            drawPath(p, color, style = Stroke(width, cap = StrokeCap.Round,
-                pathEffect = if (dash) PathEffect.dashPathEffect(floatArrayOf(2.2f * width, 2f * width)) else null))
+            drawPath(p, color, style = Stroke(width, cap = StrokeCap.Round, pathEffect = when {
+                dots -> PathEffect.dashPathEffect(floatArrayOf(0.01f, 1.8f * width))
+                dash -> PathEffect.dashPathEffect(floatArrayOf(2.2f * width, 2f * width))
+                else -> null
+            }))
         }
         // Other runs of this flight thin, gray and dashed behind; the plan dashed in the accent (from the plane on once
-        // flying); what this flight actually flew solid on top.
+        // flying); what this flight actually flew solid on top, then dotted where it's estimated (signal lost).
         if (paths != null && extra != null) {
-            extra.drop(2).forEach { stroke(it, pastRoute, 1.3.dp.toPx(), dash = true) }
+            extra.drop(3).forEach { stroke(it, pastRoute, 1.3.dp.toPx(), dash = true) }
             if (paths.arc) arcs.forEach { stroke(it, line.copy(alpha = 0.75f), w * 0.8f, dash = true) }
             stroke(extra[1], line.copy(alpha = 0.5f), w * 0.7f, dash = true)
+            stroke(extra[2], line, w, dots = true)
             stroke(extra[0], line, w)
         } else routes.zip(arcs).sortedBy { it.first.highlight }.forEach { (route, pts) ->
             val p = Path()
@@ -149,7 +153,8 @@ fun WorldMap(
             drawCircle(Color.White, s * 0.62f, c)
             translate(c.x - s / 2, c.y - s / 2) {
                 rotate(plane.track.toFloat(), Offset(s / 2, s / 2)) {
-                    with(planePainter) { draw(Size(s, s), colorFilter = ColorFilter.tint(line)) }
+                    // Faded when it's only an estimate.
+                    with(planePainter) { draw(Size(s, s), colorFilter = ColorFilter.tint(if (plane.estimated) line.copy(alpha = 0.55f) else line)) }
                 }
             }
         }

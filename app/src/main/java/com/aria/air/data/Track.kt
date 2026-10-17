@@ -36,8 +36,11 @@ fun mergeTracks(a: List<Pt>, b: List<Pt>): List<Pt> = if (a == b || a.isEmpty())
     thin((a + b).distinctBy { it.t }.sortedBy { it.t })
 // ---------- What the map draws ----------
 
-/** Faint past paths, the planned arc (or not), the flown path solid, and the rest of the way from the plane, dashed. */
-data class MapPaths(val typical: List<List<Pt>>, val arc: Boolean, val flown: List<Pt>, val rest: List<Pt>)
+/**
+ * Faint past paths, the planned arc (or not), the flown path solid, [guess] (signal lost: from the last fix to where the
+ * plane most likely is now, [plane]) dotted, and the rest of the way from the plane, dashed.
+ */
+data class MapPaths(val typical: List<List<Pt>>, val arc: Boolean, val flown: List<Pt>, val rest: List<Pt>, val guess: List<Pt> = emptyList())
 
 /** Past routes are kept per flight number and route: "UA100 SFO-BOS". */
 val Flight.routeKey get() = "$code $from-$to"
@@ -62,10 +65,11 @@ fun Flight.paths(fetched: List<List<Pt>>, others: List<Flight>, max: Int, now: I
         .sortedWith(compareByDescending<Flight> { it.code == code }.thenByDescending { it.track.last().t }).map { it.flownPath(true) }
     val typical = (fetched + mine).take(max)
     if (landed) return MapPaths(typical, flown.isEmpty(), flown, emptyList())
-    val d = dest
-    val rest = if (flown.isEmpty() || d == null) emptyList() else
-        flown.last().let { p -> greatCircle(p.lat, p.lon, d.lat, d.lon, 32).map { Pt(it.first, it.second) } }
-    return MapPaths(typical, flown.isEmpty(), flown, rest)
+    val o = origin; val d = dest
+    fun arc(a: Pt, b: Pt, n: Int) = greatCircle(a.lat, a.lon, b.lat, b.lon, n).map { Pt(it.first, it.second) }
+    val guess = plane(now)?.takeIf { it.estimated && o != null }?.let { arc(flown.lastOrNull() ?: Pt(o!!.lat, o.lon), Pt(it.lat, it.lon), 16) }.orEmpty()
+    val rest = (guess.lastOrNull() ?: flown.lastOrNull())?.takeIf { d != null }?.let { arc(it, Pt(d!!.lat, d.lon), 32) }.orEmpty()
+    return MapPaths(typical, flown.isEmpty() && guess.isEmpty(), flown, rest, guess)
 }
 
 /** [paths] for the map: past paths per the Layers toggles (one by default, up to 3 with "all"). */

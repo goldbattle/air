@@ -87,6 +87,29 @@ fun Flight.progress(now: Instant = Instant.now(clock)): Double {
     return (Duration.between(depGuess, now).toMillis().toDouble() / total).coerceIn(0.0, 1.0)
 }
 
+/**
+ * Where the plane is: the live fix while it's fresh, else, in the air with the signal lost (no coverage, adsb.lol
+ * down), an estimate along the great circle from the last fix (or the origin at takeoff) that reaches the destination
+ * at the arrival time. Its [Live.at] is the last real fix; speed 0 marks it estimated. Null when not flying.
+ */
+fun Flight.plane(now: Instant = Instant.now(clock)): Live? {
+    if (isAirborne) return live
+    if (phase(now) != Phase.InFlight || tookOff == null && track.isEmpty()) return null
+    val o = origin ?: return null; val d = dest ?: return null
+    val last = track.lastOrNull()
+    val from = last ?: Pt(o.lat, o.lon, 0, tookOff!!.epochSecond)
+    val t0 = Instant.ofEpochSecond(from.t)
+    val total = Duration.between(t0, arrGuess).toMillis().coerceAtLeast(1)
+    val k = (Duration.between(t0, now).toMillis().toDouble() / total).coerceIn(0.0, 1.0)
+    val arc = greatCircle(from.lat, from.lon, d.lat, d.lon, 100)
+    val i = (k * arc.lastIndex).toInt()
+    val (a, b) = if (i < arc.lastIndex) arc[i] to arc[i + 1] else arc[maxOf(0, i - 1)] to arc[i]
+    return Live(arc[i].first, arc[i].second, from.altFt, 0, bearing(a.first, a.second, b.first, b.second), 0, t0, false)
+}
+
+/** An estimated position ([plane] with the signal lost). */
+val Live.estimated get() = speedKt == 0 && !onGround
+
 /** Remaining distance in km: from the live position if there is one, else by progress. */
 fun Flight.remainingKm(): Double {
     val d = dest ?: return 0.0
@@ -141,11 +164,14 @@ fun plausible(f: Flight, l: Live): Boolean {
 
 /** Whether the plane's track points within 60 degrees of the direction to (lat, lon). */
 private fun headingToward(l: Live, lat: Double, lon: Double): Boolean {
-    val p1 = Math.toRadians(l.lat); val p2 = Math.toRadians(lat); val dl = Math.toRadians(lon - l.lon)
-    val bearing = Math.toDegrees(kotlin.math.atan2(kotlin.math.sin(dl) * kotlin.math.cos(p2),
-        kotlin.math.cos(p1) * kotlin.math.sin(p2) - kotlin.math.sin(p1) * kotlin.math.cos(p2) * kotlin.math.cos(dl)))
-    val diff = kotlin.math.abs(((bearing - l.track) % 360 + 540) % 360 - 180)
+    val diff = kotlin.math.abs(((bearing(l.lat, l.lon, lat, lon) - l.track) % 360 + 540) % 360 - 180)
     return diff < 60
+}
+
+/** Initial compass bearing from one point to another, in degrees. */
+private fun bearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2); val dl = Math.toRadians(lon2 - lon1)
+    return Math.toDegrees(atan2(sin(dl) * cos(p2), cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)))
 }
 
 /**
