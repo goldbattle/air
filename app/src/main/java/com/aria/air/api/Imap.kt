@@ -137,12 +137,29 @@ class Imap(private val sock: Socket) : Closeable {
             // Emulator testing against a stub on the host machine, in debug builds only (R8 drops this in release).
             if (BuildConfig.DEBUG && host == "10.0.2.2") return Imap(Socket().apply { connect(InetSocketAddress(host, 1143), 20_000); soTimeout = 60_000 })
             // Connect first (for the timeout), then layer TLS on top naming the host, so the server gets SNI.
-            val plain = Socket().apply { connect(InetSocketAddress(host, 993), 20_000); soTimeout = 60_000 }
+            val plain = open(host, 993)
             val s = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(plain, host, 993, true) as SSLSocket
             // The TLS layer checks the certificate is for this host before any byte, password included, is sent.
             s.sslParameters = s.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
             s.startHandshake()
             return Imap(s)
+        }
+
+        /**
+         * A socket to any of [host]'s addresses, IPv4 first: one with no route (often IPv6 behind a VPN, failing with
+         * ENETUNREACH) mustn't sink the connection, as browsers and OkHttp also move on to the next.
+         */
+        private fun open(host: String, port: Int): Socket {
+            var err: java.io.IOException? = null
+            for (a in java.net.InetAddress.getAllByName(host).sortedBy { it is java.net.Inet6Address }) {
+                val sock = Socket()
+                try {
+                    return sock.apply { connect(InetSocketAddress(a, port), 10_000); soTimeout = 60_000 }
+                } catch (e: java.io.IOException) {
+                    sock.close(); err = e
+                }
+            }
+            throw err ?: java.net.UnknownHostException(host)
         }
 
         /** [s] as an IMAP quoted string, with backslashes and quotes escaped. */

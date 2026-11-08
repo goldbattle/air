@@ -196,7 +196,7 @@ object Mail {
         return when {
             m.contains("AUTHENTICATIONFAILED", true) || m.contains("Invalid credentials", true) -> "Wrong email or app password"
             m.contains("Application-specific password", true) -> "Needs an app password, not your Google password"
-            e is java.net.UnknownHostException -> "No connection"
+            e is java.net.UnknownHostException || m.contains("ENETUNREACH") -> "No connection (a VPN or network blocking mail?)"
             e is java.net.SocketTimeoutException -> "The server didn't answer"
             e is javax.crypto.AEADBadTagException || e is java.security.GeneralSecurityException -> "Password unreadable; remove and add the account again"
             else -> "Couldn't connect: ${e.javaClass.name}${if (m.isNotEmpty()) " ($m)" else ""}".also { android.util.Log.w("Air", "mail", e) }
