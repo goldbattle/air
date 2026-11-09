@@ -260,6 +260,7 @@ CAPTIONS = [
     ("friends", "Friends", "Friends' flights, tracked live like your own, with alerts when they land."),
     ("passport", "Passport", "Your flights on a map with miles, time in the air, airports and countries."),
     ("passport_lists", "Passport lists", "Top airports, airlines and routes; personal and work trips counted separately."),
+    ("airport_map", "Terminal map", "The airport's floors from OpenStreetMap: gates, food, restrooms and shops, a floor dial and you-are-here."),
     ("import", "Import", "Confirmations read on the phone: traveler, flights, seats and confirmation codes."),
     ("notifications", "Notifications", "Live countdown before departure, then flight progress, as ongoing notifications."),
     ("widget", "Widget", "Home screen widget with the route map and a big countdown."),
@@ -268,7 +269,7 @@ CAPTIONS = [
 
 
 # Only these make the README; the rest are still captured into docs/screenshots for reference.
-README_SELECT = ["flights", "flight_live", "notifications", "passport"]
+README_SELECT = ["flights", "flight_live", "airport_map", "notifications", "passport"]
 
 
 def update_readme() -> None:
@@ -346,6 +347,11 @@ def tour(live_labels: list[str]) -> None:
     if tap_text("UA 1234"):
         time.sleep(3)
         shot("flight_pretravel")
+        scroll(1500)
+        if tap_text("Map"):  # the departure airport's terminal map
+            time.sleep(8)
+            shot("airport_map")
+            back()
         back()
 
     if tap_text("Past", prefix=True):

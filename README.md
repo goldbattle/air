@@ -6,7 +6,7 @@ This entire app is vibe coded and was built for a single user, me, so use it at 
 yourself.
 
 <!-- screenshots:start -->
-<p align="center"><img src="docs/screenshots/flights.png" width="200" alt="flights"> <img src="docs/screenshots/flight_live.png" width="200" alt="flight_live"> <img src="docs/screenshots/notifications.png" width="200" alt="notifications"> <img src="docs/screenshots/passport.png" width="200" alt="passport"></p>
+<p align="center"><img src="docs/screenshots/flights.png" width="200" alt="flights"> <img src="docs/screenshots/flight_live.png" width="200" alt="flight_live"> <img src="docs/screenshots/airport_map.png" width="200" alt="airport_map"> <img src="docs/screenshots/notifications.png" width="200" alt="notifications"> <img src="docs/screenshots/passport.png" width="200" alt="passport"></p>
 <!-- screenshots:end -->
 
 ## Features
