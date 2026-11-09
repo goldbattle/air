@@ -20,8 +20,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.material3.DropdownMenu
@@ -173,12 +181,13 @@ fun AirportMapScreen(code: String, gate: String) {
                         }
                     },
             )
-            // Right side, under the header: layers (what to show), the floor, and where you are.
+            // Right side, under the header: refresh, layers (what to show), the floor, and where you are.
             var floors by remember { mutableStateOf(false) }
             Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 68.dp, end = 12.dp)) {
                 if (floors) LevelPicker(map.levels, level, Modifier.padding(end = 10.dp)) { level = it; picked = null; floors = false }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PlacesButton(map, level, filter, busy, onRefresh = { App.scope.launch { IndoorMaps.get(code, force = true) } }) {
+                    RefreshButton(busy) { App.scope.launch { IndoorMaps.get(code, force = true) } }
+                    PlacesButton(map, level, filter, busy) {
                         filter = if (filter == it) null else it; picked = null
                     }
                     if (map.levels.size > 1) LevelButton(map.levels, level, onTap = { floors = !floors }) { level = it; picked = null }
@@ -235,9 +244,13 @@ fun AirportMapScreen(code: String, gate: String) {
             }
         }
 
-        // Bottom: what you tapped.
-        picked?.let {
-            PickedCard(it, target?.takeIf { t -> t != it }, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(12.dp)) { picked = null }
+        // Bottom: what you tapped, then the credit OpenStreetMap's license asks for, as plain small text.
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            picked?.let { PickedCard(it, target?.takeIf { t -> t != it }, Modifier.padding(bottom = 6.dp)) { picked = null } }
+            Text(
+                "© OpenStreetMap contributors", fontSize = 10.sp, color = C.secondary,
+                modifier = Modifier.clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://www.openstreetmap.org/copyright".toUri())) } },
+            )
         }
     }
 }
@@ -472,38 +485,79 @@ private fun LevelPicker(levels: List<Double>, level: Double?, modifier: Modifier
     }
 }
 
-/** The floor you're on: swipe up or down to change it a floor at a time, tap for the full list ([onTap]). */
+/**
+ * The floor you're on, as a dial: the floors roll with your finger, and letting go past half a notch moves one floor
+ * (drag up for the floor above, down for the one below), else it springs back. One floor per drag. Tap for the full
+ * list ([onTap]).
+ */
 @Composable
 private fun LevelButton(levels: List<Double>, level: Double?, onTap: () -> Unit, onPick: (Double) -> Unit) {
-    val step = with(LocalDensity.current) { 28.dp.toPx() }
-    val now by rememberUpdatedState(level)
+    val notch = with(LocalDensity.current) { 22.dp.toPx() }
+    val i = levels.indexOf(level).coerceAtLeast(0)
+    val roll = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
     Pill(
-        Modifier.clickable(onClick = onTap).pointerInput(levels) {
-            var moved = 0f
-            detectVerticalDragGestures(onDragStart = { moved = 0f }) { _, dy ->
-                moved += dy
-                if (kotlin.math.abs(moved) < step) return@detectVerticalDragGestures
-                val i = levels.indexOf(now).coerceAtLeast(0) + if (moved < 0) 1 else -1 // swiping up goes up a floor
-                moved = 0f
-                levels.getOrNull(i)?.let(onPick)
+        Modifier.height(60.dp).clickable(onClick = onTap).pointerInput(levels, i) {
+            detectVerticalDragGestures(
+                onDragEnd = {
+                    // Rolled up (negative) brings the floor above into place, as the dial turns under the finger.
+                    val next = levels.getOrNull(i + if (roll.value < 0) 1 else -1)?.takeIf { kotlin.math.abs(roll.value) > notch / 2 }
+                    scope.launch {
+                        if (next == null) roll.animateTo(0f, spring(dampingRatio = 0.6f))
+                        else { roll.animateTo(if (roll.value < 0) -notch else notch, tween(120)); onPick(next); roll.snapTo(0f) }
+                    }
+                },
+                onDragCancel = { scope.launch { roll.animateTo(0f) } },
+            ) { change, dy ->
+                change.consume()
+                // Past the last floor it only gives a little.
+                val room = { up: Boolean -> if (levels.getOrNull(i + if (up) 1 else -1) != null) notch else notch / 4 }
+                scope.launch { roll.snapTo((roll.value + dy).coerceIn(-room(true), room(false))) }
             }
-        }.padding(vertical = 4.dp),
+        },
     ) {
-        val i = levels.indexOf(level)
-        Icon(Icons.Filled.KeyboardArrowUp, null, tint = if (i < levels.lastIndex) C.secondary else C.tertiary, modifier = Modifier.size(16.dp))
-        Text(level?.let(::levelName) ?: "–", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.label)
-        Icon(Icons.Filled.KeyboardArrowDown, null, tint = if (i > 0) C.secondary else C.tertiary, modifier = Modifier.size(16.dp))
+        Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
+            for (j in i - 1..i + 1) {
+                val l = levels.getOrNull(j) ?: continue
+                // Floors above sit below on the dial (they roll up into place); faint until they're in the middle.
+                val y = (j - i) * notch + roll.value
+                val near = 1f - (kotlin.math.abs(y) / notch).coerceIn(0f, 1f)
+                Text(
+                    levelName(l), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.label,
+                    modifier = Modifier.graphicsLayer {
+                        translationY = y; alpha = 0.25f + 0.75f * near; scaleX = 0.8f + 0.2f * near; scaleY = scaleX
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** Downloads the map again from OpenStreetMap; the arrows spin while it does. */
+@Composable
+private fun RefreshButton(busy: Boolean, onClick: () -> Unit) {
+    val spin by rememberInfiniteTransition(label = "refresh").animateFloat(
+        0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "spin",
+    )
+    Pill {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).clickable(enabled = !busy, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Refresh, "Refresh the map", tint = if (busy) C.blue else C.label,
+                modifier = Modifier.size(22.dp).graphicsLayer { rotationZ = if (busy) spin else 0f },
+            )
+        }
     }
 }
 
 /**
  * The layers button: a menu of the kinds of places on this floor ("🚻 Restrooms 4"), one at a time showing only that
- * kind, then when the map was downloaded (with a refresh) and the credit OpenStreetMap's license asks for. Blue while a
- * kind is picked.
+ * kind, then when the map was downloaded. Blue while a kind is picked.
  */
 @Composable
-private fun PlacesButton(map: IndoorMap, level: Double?, on: Place?, busy: Boolean, onRefresh: () -> Unit, onPick: (Place) -> Unit) {
-    val ctx = LocalContext.current
+private fun PlacesButton(map: IndoorMap, level: Double?, on: Place?, busy: Boolean, onPick: (Place) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val counts = remember(map, level) {
         map.features.filter { !it.kind.area && it.kind != Place.GATE && it.on(level) }.groupingBy { it.kind }.eachCount()
@@ -526,13 +580,8 @@ private fun PlacesButton(map: IndoorMap, level: Double?, on: Place?, busy: Boole
             }
             HorizontalDivider(color = C.separator)
             DropdownMenuItem(
-                text = { Text(if (busy) "Updating…" else "Updated ${ago(map.at)}", fontSize = 13.sp, color = C.secondary) },
-                trailingIcon = { if (!busy) Text("Refresh", fontSize = 13.sp, color = C.blue) },
-                enabled = !busy, onClick = { onRefresh(); open = false },
-            )
-            DropdownMenuItem(
-                text = { Text("Map data © OpenStreetMap", fontSize = 13.sp, color = C.secondary) },
-                onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://www.openstreetmap.org/copyright".toUri())) }; open = false },
+                text = { Text(if (busy) "Updating…" else "Map updated ${ago(map.at)}", fontSize = 13.sp, color = C.secondary) },
+                enabled = false, onClick = {},
             )
         }
     }

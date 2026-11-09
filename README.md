@@ -25,7 +25,8 @@ yourself.
 - Terminal maps from OpenStreetMap: floors, gates, food, restrooms and shops, opened on your gate. The 30 busiest US
   airports ship with the app; others download once and then work offline. Tap the Map chip on a flight, or the
   Terminal map button on the live notification. A you-are-here dot (location is read on the phone only, while the map
-  is open). On the side: a layers menu to show one kind of place, the floor (swipe it up or down, or tap for the list),
+  is open). On the side: refresh, a layers menu to show one kind of place, the floor (a dial: drag up or down a floor at
+  a time, or tap for the list),
   and locate me.
 - An aircraft page for the plane flying your flight: model, age, seats, and how late its last week of flights landed.
 - A passport view: every past flight on a map, with miles, time in the air, top airports/airlines/routes/aircraft,
