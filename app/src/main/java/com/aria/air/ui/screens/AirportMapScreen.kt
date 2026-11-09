@@ -19,6 +19,14 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import android.net.Uri
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -27,9 +35,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -167,18 +173,23 @@ fun AirportMapScreen(code: String, gate: String) {
                         }
                     },
             )
-            Column(
-                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 68.dp, end = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Box(Modifier.shadow(3.dp, CircleShape)) {
-                    MapButton(Icons.Filled.MyLocation, "Where am I") {
-                        if (!allowed) ask.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                        else if (fix == null) { follow = true; Toast.makeText(ctx, "Finding you…", Toast.LENGTH_SHORT).show() }
-                        else follow = true
+            // Right side, under the header: layers (what to show), the floor, and where you are.
+            var floors by remember { mutableStateOf(false) }
+            Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 68.dp, end = 12.dp)) {
+                if (floors) LevelPicker(map.levels, level, Modifier.padding(end = 10.dp)) { level = it; picked = null; floors = false }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PlacesButton(map, level, filter, busy, onRefresh = { App.scope.launch { IndoorMaps.get(code, force = true) } }) {
+                        filter = if (filter == it) null else it; picked = null
+                    }
+                    if (map.levels.size > 1) LevelButton(map.levels, level, onTap = { floors = !floors }) { level = it; picked = null }
+                    Pill {
+                        MapIcon(Icons.Filled.MyLocation, "Where am I", if (here != null) C.blue else C.label) {
+                            if (!allowed) ask.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                            else if (fix == null) { follow = true; Toast.makeText(ctx, "Finding you…", Toast.LENGTH_SHORT).show() }
+                            else follow = true
+                        }
                     }
                 }
-                if (map.levels.size > 1) LevelPicker(map.levels, level, Modifier) { level = it; picked = null }
             }
             if (map.features.none { it.kind >= Place.ROOM }) Notice(
                 Icons.Filled.Map, "Only the outlines so far",
@@ -195,15 +206,14 @@ fun AirportMapScreen(code: String, gate: String) {
             ) { App.scope.launch { IndoorMaps.get(code, force = true) } }
         }
 
-        // Top: back, which airport and floor (and your gate), and open in another maps app.
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            MapButton(Icons.Filled.ChevronLeft, "Back") { Nav.pop() }
-            Spacer(Modifier.width(10.dp))
-            Box(Modifier.weight(1f)) { Column(
-                Modifier.shadow(3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
-                    .background(C.card).padding(horizontal = 14.dp, vertical = 7.dp),
-            ) {
-                Text(a?.name ?: code, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Top: a header bar with back, which airport, floor, gate and filter, and open in another maps app.
+        Row(
+            Modifier.fillMaxWidth().shadow(2.dp).background(C.bar).statusBarsPadding().height(56.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MapIcon(Icons.Filled.ChevronLeft, "Back", C.blue, size = 30) { Nav.pop() }
+            Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                Text(a?.name ?: code, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = C.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val sub = listOfNotNull(
                     code,
                     level?.takeIf { (map?.levels?.size ?: 0) > 1 }?.let { "Level ${levelName(it)}" },
@@ -214,41 +224,38 @@ fun AirportMapScreen(code: String, gate: String) {
                             else -> "Gate $it not mapped"
                         }
                     },
+                    filter?.let { "${it.label} only" },
                 ).joinToString(" · ")
-                Text(sub, fontSize = 12.sp, color = C.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            } }
-            Spacer(Modifier.width(10.dp))
-            MapButton(Icons.AutoMirrored.Filled.OpenInNew, "Open in a maps app") {
-                val p = picked?.at ?: target?.at ?: a?.let { Pt(it.lat, it.lon) } ?: return@MapButton
+                Text(sub, fontSize = 13.sp, color = C.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            MapIcon(Icons.AutoMirrored.Filled.OpenInNew, "Open in a maps app", C.blue) {
+                val p = picked?.at ?: target?.at ?: a?.let { Pt(it.lat, it.lon) } ?: return@MapIcon
                 val label = picked?.let { it.name.ifEmpty { it.kind.label } } ?: target?.let { "Gate ${it.ref}" } ?: code
                 runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "geo:0,0?q=${p.lat},${p.lon}(${Uri.encode(label)})".toUri())) }
             }
         }
 
-        // Bottom: what you tapped, the filters, then the credit OpenStreetMap's license asks for, with a refresh.
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
-            picked?.let { PickedCard(it, target?.takeIf { t -> t != it }, Modifier.padding(horizontal = 12.dp)) { picked = null } }
-            if (map != null) Filters(map, level, filter) { filter = if (filter == it) null else it; picked = null }
-            Row(Modifier.padding(start = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "© OpenStreetMap", fontSize = 11.sp, color = C.secondary,
-                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(C.card.copy(alpha = 0.8f))
-                        .clickable { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://www.openstreetmap.org/copyright".toUri())) } }
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-                if (map != null) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (busy) "Updating…" else "Updated ${ago(map.at)} · Refresh", fontSize = 11.sp, color = if (busy) C.secondary else C.blue,
-                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(C.card.copy(alpha = 0.8f))
-                            .clickable(enabled = !busy) { App.scope.launch { IndoorMaps.get(code, force = true) } }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
-            }
+        // Bottom: what you tapped.
+        picked?.let {
+            PickedCard(it, target?.takeIf { t -> t != it }, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(12.dp)) { picked = null }
         }
     }
 }
+
+/** An icon button with no background of its own, for the header and inside [Pill]s. */
+@Composable
+private fun MapIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, size: Int = 22, onClick: () -> Unit,
+) = Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Icon(icon, label, tint = tint, modifier = Modifier.size(size.dp))
+}
+
+/** The floating card the map's side buttons sit in. */
+@Composable
+private fun Pill(modifier: Modifier = Modifier, color: Color = C.card, content: @Composable ColumnScope.() -> Unit) = Column(
+    Modifier.width(44.dp).shadow(3.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp)).background(color).then(modifier),
+    horizontalAlignment = Alignment.CenterHorizontally, content = content,
+)
 
 /** A centered card for loading, errors and empty maps: an icon (a spinner when null), a title, a line, and a button. */
 @Composable
@@ -450,47 +457,84 @@ private class PlaceColors {
     }
 }
 
-/** The floor buttons down the right side, top floor first. */
+/** The full list of floors, top first, beside the level button. */
 @Composable
 private fun LevelPicker(levels: List<Double>, level: Double?, modifier: Modifier, onPick: (Double) -> Unit) = Column(
-    modifier.shadow(3.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).background(C.card).padding(3.dp),
-    verticalArrangement = Arrangement.spacedBy(1.dp),
+    modifier.shadow(3.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp)).background(C.card).padding(4.dp),
+    verticalArrangement = Arrangement.spacedBy(2.dp),
 ) {
     levels.reversed().forEach { l ->
         val on = l == level
         Box(
-            Modifier.size(34.dp).clip(CircleShape).background(if (on) C.blue else Color.Transparent).clickable { onPick(l) },
+            Modifier.size(36.dp).clip(CircleShape).background(if (on) C.blue else Color.Transparent).clickable { onPick(l) },
             contentAlignment = Alignment.Center,
-        ) { Text(levelName(l), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (on) Color.White else C.label) }
+        ) { Text(levelName(l), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (on) Color.White else C.label) }
     }
 }
 
-/** Chips for the kinds of places on this floor ("🚻 Restrooms 4"); one at a time shows only that kind. */
+/** The floor you're on: swipe up or down to change it a floor at a time, tap for the full list ([onTap]). */
 @Composable
-private fun Filters(map: IndoorMap, level: Double?, on: Place?, onPick: (Place) -> Unit) {
+private fun LevelButton(levels: List<Double>, level: Double?, onTap: () -> Unit, onPick: (Double) -> Unit) {
+    val step = with(LocalDensity.current) { 28.dp.toPx() }
+    val now by rememberUpdatedState(level)
+    Pill(
+        Modifier.clickable(onClick = onTap).pointerInput(levels) {
+            var moved = 0f
+            detectVerticalDragGestures(onDragStart = { moved = 0f }) { _, dy ->
+                moved += dy
+                if (kotlin.math.abs(moved) < step) return@detectVerticalDragGestures
+                val i = levels.indexOf(now).coerceAtLeast(0) + if (moved < 0) 1 else -1 // swiping up goes up a floor
+                moved = 0f
+                levels.getOrNull(i)?.let(onPick)
+            }
+        }.padding(vertical = 4.dp),
+    ) {
+        val i = levels.indexOf(level)
+        Icon(Icons.Filled.KeyboardArrowUp, null, tint = if (i < levels.lastIndex) C.secondary else C.tertiary, modifier = Modifier.size(16.dp))
+        Text(level?.let(::levelName) ?: "–", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.label)
+        Icon(Icons.Filled.KeyboardArrowDown, null, tint = if (i > 0) C.secondary else C.tertiary, modifier = Modifier.size(16.dp))
+    }
+}
+
+/**
+ * The layers button: a menu of the kinds of places on this floor ("🚻 Restrooms 4"), one at a time showing only that
+ * kind, then when the map was downloaded (with a refresh) and the credit OpenStreetMap's license asks for. Blue while a
+ * kind is picked.
+ */
+@Composable
+private fun PlacesButton(map: IndoorMap, level: Double?, on: Place?, busy: Boolean, onRefresh: () -> Unit, onPick: (Place) -> Unit) {
+    val ctx = LocalContext.current
+    var open by remember { mutableStateOf(false) }
     val counts = remember(map, level) {
         map.features.filter { !it.kind.area && it.kind != Place.GATE && it.on(level) }.groupingBy { it.kind }.eachCount()
             .entries.sortedBy { it.key.ordinal }
     }
-    if (counts.isEmpty()) return
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Spacer(Modifier.width(6.dp))
-        counts.forEach { (k, n) ->
-            val sel = k == on
-            Row(
-                Modifier.shadow(2.dp, RoundedCornerShape(50)).clip(RoundedCornerShape(50)).background(if (sel) C.blue else C.card)
-                    .clickable { onPick(k) }.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(k.icon, fontSize = 13.sp)
-                Text(" ${k.label}", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (sel) Color.White else C.label)
-                Text(" $n", fontSize = 13.sp, color = if (sel) Color.White.copy(alpha = 0.8f) else C.secondary)
-            }
+    Box {
+        Pill(color = if (on != null) C.blue else C.card) {
+            MapIcon(Icons.Filled.Layers, "Places", if (on != null) Color.White else C.label) { open = true }
         }
-        Spacer(Modifier.width(6.dp))
+        DropdownMenu(open, { open = false }, containerColor = C.card) {
+            DropdownMenuItem(
+                text = { Text("Everything") }, onClick = { on?.let(onPick); open = false },
+                trailingIcon = { if (on == null) Icon(Icons.Filled.Check, null, tint = C.blue) },
+            )
+            counts.forEach { (k, n) ->
+                DropdownMenuItem(
+                    text = { Text("${k.icon}  ${k.label}") }, onClick = { onPick(k); open = false },
+                    trailingIcon = { if (k == on) Icon(Icons.Filled.Check, null, tint = C.blue) else Text("$n", color = C.secondary) },
+                )
+            }
+            HorizontalDivider(color = C.separator)
+            DropdownMenuItem(
+                text = { Text(if (busy) "Updating…" else "Updated ${ago(map.at)}", fontSize = 13.sp, color = C.secondary) },
+                trailingIcon = { if (!busy) Text("Refresh", fontSize = 13.sp, color = C.blue) },
+                enabled = !busy, onClick = { onRefresh(); open = false },
+            )
+            DropdownMenuItem(
+                text = { Text("Map data © OpenStreetMap", fontSize = 13.sp, color = C.secondary) },
+                onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, "https://www.openstreetmap.org/copyright".toUri())) }; open = false },
+            )
+        }
     }
 }
 
