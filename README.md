@@ -22,12 +22,7 @@ yourself.
   OCR and PDF text extraction run on-device.
 - Optional Gmail scan: link one or more mailboxes with an app password and Air finds past and new bookings for you
   to pick from. Manual, or every few weeks in the background.
-- Terminal maps from OpenStreetMap: floors, gates, food, restrooms and shops, opened on your gate. The 30 busiest US
-  airports ship with the app; others download once and then work offline. Tap the Map chip on a flight, or the
-  Terminal map button on the live notification. A you-are-here dot (location is read on the phone only, while the map
-  is open). On the side: refresh, a layers menu to show one kind of place, the floor (a dial: drag up or down a floor at
-  a time, wrapping around, or tap for the list),
-  and locate me.
+- Terminal maps from OpenStreetMap with gates, food, restrooms and shops, opened on your gate and saved for offline use.
 - An aircraft page for the plane flying your flight: model, age, seats, and how late its last week of flights landed.
 - A passport view: every past flight on a map, with miles, time in the air, top airports/airlines/routes/aircraft,
   and a year in review (estimated CO₂, on-time rate, busiest month, new airports, the year before).
