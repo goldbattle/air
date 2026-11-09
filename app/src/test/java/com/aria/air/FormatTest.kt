@@ -91,6 +91,8 @@ class FormatTest : AirTest() {
         assertEquals("United Airlines", Db.airline("ua")!!.name)
         assertEquals("UA", Db.airlinesByIcao["UAL"]!!.iata)
         assertEquals(null, Db.airport(null))
+        assertEquals("San Francisco Intl", shortName("San Francisco International Airport"))
+        assertEquals("Portland Intl Jetport", shortName("Portland International Jetport"))
     }
 
     @Test

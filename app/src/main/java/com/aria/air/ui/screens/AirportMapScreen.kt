@@ -102,6 +102,10 @@ private class Proj(private val lat0: Double, private val lon0: Double) {
 /** "1", "-1", "1.5" for a floor. */
 private fun levelName(l: Double) = if (l % 1.0 == 0.0) l.toInt().toString() else l.toString()
 
+/** An airport name short enough for the header: "San Francisco International Airport" -> "San Francisco Intl". */
+internal fun shortName(name: String) = name.replace("International", "Intl").replace("Municipal", "Muni")
+    .removeSuffix(" Airport").trim()
+
 /**
  * An airport's indoor map: terminals and rooms on the chosen floor, gates, and points of interest as icons. Pinch to
  * zoom, drag to pan, double-tap to fit; tap an icon or gate for its details. [gate] (the flight's) is marked and the map
@@ -222,7 +226,7 @@ fun AirportMapScreen(code: String, gate: String) {
         ) {
             MapIcon(Icons.Filled.ChevronLeft, "Back", C.blue, size = 30) { Nav.pop() }
             Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
-                Text(a?.name ?: code, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = C.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(a?.name?.let(::shortName) ?: code, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = C.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val sub = listOfNotNull(
                     code,
                     level?.takeIf { (map?.levels?.size ?: 0) > 1 }?.let { "Level ${levelName(it)}" },
@@ -486,47 +490,44 @@ private fun LevelPicker(levels: List<Double>, level: Double?, modifier: Modifier
 }
 
 /**
- * The floor you're on, as a dial: the floors roll with your finger, and letting go past half a notch moves one floor
- * (drag up for the floor above, down for the one below), else it springs back. One floor per drag. Tap for the full
- * list ([onTap]).
+ * The floor you're on, as a dial in a round button like the others: the number rolls with your finger, and letting go
+ * past half a notch moves one floor (drag up for the floor above, down for the one below), else it springs back. One
+ * floor per drag, wrapping around past the top and bottom floors. Tap for the full list ([onTap]).
  */
 @Composable
 private fun LevelButton(levels: List<Double>, level: Double?, onTap: () -> Unit, onPick: (Double) -> Unit) {
-    val notch = with(LocalDensity.current) { 22.dp.toPx() }
+    val notch = with(LocalDensity.current) { 30.dp.toPx() } // the next number starts just outside the button
     val i = levels.indexOf(level).coerceAtLeast(0)
     val roll = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
-    Pill(
-        Modifier.height(60.dp).clickable(onClick = onTap).pointerInput(levels, i) {
-            detectVerticalDragGestures(
-                onDragEnd = {
-                    // Rolled up (negative) brings the floor above into place, as the dial turns under the finger.
-                    val next = levels.getOrNull(i + if (roll.value < 0) 1 else -1)?.takeIf { kotlin.math.abs(roll.value) > notch / 2 }
-                    scope.launch {
-                        if (next == null) roll.animateTo(0f, spring(dampingRatio = 0.6f))
-                        else { roll.animateTo(if (roll.value < 0) -notch else notch, tween(120)); onPick(next); roll.snapTo(0f) }
-                    }
-                },
-                onDragCancel = { scope.launch { roll.animateTo(0f) } },
-            ) { change, dy ->
-                change.consume()
-                // Past the last floor it only gives a little.
-                val room = { up: Boolean -> if (levels.getOrNull(i + if (up) 1 else -1) != null) notch else notch / 4 }
-                scope.launch { roll.snapTo((roll.value + dy).coerceIn(-room(true), room(false))) }
-            }
-        },
-    ) {
-        Box(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
-            for (j in i - 1..i + 1) {
-                val l = levels.getOrNull(j) ?: continue
-                // Floors above sit below on the dial (they roll up into place); faint until they're in the middle.
-                val y = (j - i) * notch + roll.value
-                val near = 1f - (kotlin.math.abs(y) / notch).coerceIn(0f, 1f)
-                Text(
-                    levelName(l), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.label,
-                    modifier = Modifier.graphicsLayer {
-                        translationY = y; alpha = 0.25f + 0.75f * near; scaleX = 0.8f + 0.2f * near; scaleY = scaleX
+    fun at(d: Int) = levels[(i + d).mod(levels.size)]
+    Pill {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onTap).pointerInput(levels, i) {
+                detectVerticalDragGestures(
+                    onDragEnd = {
+                        // Rolled up (negative) brings the floor above into place, as the dial turns under the finger.
+                        val d = if (roll.value < 0) 1 else -1
+                        scope.launch {
+                            if (kotlin.math.abs(roll.value) < notch / 2) roll.animateTo(0f, spring(dampingRatio = 0.6f))
+                            else { roll.animateTo(-d * notch, tween(120)); onPick(at(d)); roll.snapTo(0f) }
+                        }
                     },
+                    onDragCancel = { scope.launch { roll.animateTo(0f) } },
+                ) { change, dy ->
+                    change.consume()
+                    scope.launch { roll.snapTo((roll.value + dy).coerceIn(-notch, notch)) }
+                }
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            // The floor above rolls up from below, the one below down from above; only the middle one shows at rest.
+            for (d in -1..1) {
+                val y = d * notch + roll.value
+                if (d != 0 && (y > 0) == (d > 0) && kotlin.math.abs(y) >= notch) continue
+                Text(
+                    levelName(at(d)), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = C.label,
+                    modifier = Modifier.graphicsLayer { translationY = y; alpha = 1f - (kotlin.math.abs(y) / notch).coerceIn(0f, 1f) },
                 )
             }
         }
