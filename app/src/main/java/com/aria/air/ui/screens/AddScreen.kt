@@ -80,7 +80,7 @@ fun importInto(ctx: Context, uri: Uri?, text: String?, friend: Boolean) {
             Imports.error = "Couldn't read it: ${raw.exceptionOrNull()?.message}"
         } else {
             val found = Importer.parse(t)
-            Imports.traveler = Importer.traveler(t)
+            Imports.traveler = Importer.traveler(t, Store.friends + Prefs.name)
             Imports.to = Importer.recipient(t) { Prefs.workFor(it) != null }
             Imports.work = Importer.isWork(t, Imports.to, Prefs::workFor)
             Imports.found = found

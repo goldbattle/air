@@ -43,6 +43,7 @@ data class Flight(
     val faAt: Instant? = null,        // when FlightAware last gave gates, tail and inbound (they outrank AeroDataBox's)
     val adbSaid: String = "",         // AeroDataBox's last raw "departure gate|arrival gate", to notice it changing
     val disputed: Boolean = false,    // AeroDataBox just reported a new gate that FlightAware should confirm (not saved)
+    val mismatch: String = "",        // the status service flies this number elsewhere that day ("LAX → DEN"): check the number or date
     val live: Live? = null,
     val updated: Instant? = null,     // last successful status refresh
     val alerted: String = "",         // events already notified (comma list), so alerts fire once

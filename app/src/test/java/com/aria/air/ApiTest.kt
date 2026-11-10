@@ -183,6 +183,15 @@ class ApiTest : AirTest() {
         assertEquals("Boeing 737 MAX 8", n.aircraft); assertEquals("N12345", n.reg)
         assertFalse(n.cancelled); assertFalse(n.diverted)
         assertEquals("key", headers["X-RapidAPI-Key"])
+        // The same number flown elsewhere that day isn't this flight: no status, and the route stays ours.
+        responses["flights/number/UA100/2026-10-02"] = "[${adbLeg("2026-10-02", "DEN", "Expected")}]"
+        // Reported, though: the number flies DEN → BOS that day.
+        assertEquals("DEN → BOS", AeroDataBox.status(f, "key")!!.mismatch)
+        // A saved route is never replaced by the lookup's (here it says BOS); only a blank one is filled.
+        responses["flights/number/UA100/2026-10-02"] = "[${adbLeg("2026-10-02", "SFO", "Expected")}]"
+        AeroDataBox.status(f.copy(to = "EWR"), "key")!!.let { assertEquals("EWR", it.to); assertEquals("SFO → BOS", it.mismatch) }
+        assertEquals("", AeroDataBox.status(f, "key")!!.mismatch)
+        assertEquals("BOS", AeroDataBox.status(f.copy(to = ""), "key")!!.to)
     }
 
     @Test

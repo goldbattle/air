@@ -97,8 +97,8 @@ object Importer {
         Regex("(?i)(?:passenger|traveler|traveller)s?(?: name)?[ \\t]*:[ \\t]*($NAME)"),
         // United: a "Travelers" heading with the name on the next line.
         Regex("(?im)^[ \\t]*(?:travelers|travellers|passengers)[ \\t]*\\r?\\n[ \\t]*($NAME)[ \\t]*$"),
-        // Airline receipts: "Traveler Details" then "DOE/JOHNQ" (LAST/FIRST).
-        Regex("(?im)^[ \\t]*(?:traveler|traveller|passenger)s? (?:details|information)[ \\t]*\\r?\\n[ \\t]*([A-Za-z'-]+/[A-Za-z'-]+(?:[ \\t]+[A-Za-z]+)?)[ \\t]*$"),
+        // Airline receipts: "Traveler Details" then "DOE/JOHNQ" (LAST/FIRST); Delta: "PASSENGER INFORMATION" then "JANE A DOE".
+        Regex("(?im)^[ \\t]*(?:traveler|traveller|passenger)s? (?:details|information)[ \\t]*\\r?\\n[ \\t]*([A-Za-z'-]+/[A-Za-z'-]+(?:[ \\t]+[A-Za-z]+)?|$NAME)[ \\t]*$"),
         Regex("\\b([A-Z][a-z]+(?: [A-Z]\\.?)?(?: [A-Z][a-z]+)?)'s (?:Upcoming )?(?:Trip|Flight|Itinerary)"),
     )
 
@@ -153,7 +153,10 @@ object Importer {
     }.toList()
 
     /** Ligatures ("ﬁ"), narrow no-break spaces before AM/PM and the like, folded to plain text. */
-    fun clean(text: String): String = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC).replace(' ', ' ')
+    fun clean(text: String): String = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC)
+        // Delta's "BOS>SEA" hides a "to" between the codes that some PDF readers spell out a letter a line: "BOS>\nt\no\nSEA".
+        .replace(Regex("\\b([A-Z]{3})>\\s*(?:t\\s*o\\s+)?([A-Z]{3})\\b"), "$1>$2")
+        .replace(' ', ' ')
 
     private val workRe = Regex(
         "(?i)cost cent(?:er|re)|charged to department|travel (?:&|and) expense|expense policy|in policy fare|project number|" +
@@ -178,10 +181,14 @@ object Importer {
     /** Work trip or not: what you chose before for mail sent [to] that address, else whether it reads like a company booking. */
     fun isWork(text: String, to: String?, learned: (String) -> Boolean?) = to?.let(learned) ?: isWork(text)
 
-    /** Who the booking is for, e.g. "Trip Information For: Jane Q Doe", or null. */
-    fun traveler(text: String): String? {
+    /**
+     * Who the booking is for: a labeled name ("Trip Information For: Jane Q Doe"), else one of the [known] people
+     * (you and your friends) named in the itinerary itself. Email headers, greetings and sign-offs don't count, so a
+     * forwarded email isn't taken for the forwarder's or your trip. Null when neither, or when several known people are.
+     */
+    fun traveler(text: String, known: List<String> = emptyList()): String? {
         val t = clean(text)
-        var raw = travelerRes.firstNotNullOfOrNull { it.find(t)?.groupValues?.get(1)?.trim() } ?: return null
+        var raw = travelerRes.firstNotNullOfOrNull { it.find(t)?.groupValues?.get(1)?.trim() } ?: return knownIn(t, known)
         // "Jane Q. Doe. Thu, Oct 22" -> "Jane Q. Doe": a sentence ends after a word, not after an initial.
         raw = raw.replace(Regex("(?<=\\p{L}{2})[.;,](\\s.*)?$"), "")
         if ('/' in raw) raw = raw.substringAfter('/') + " " + raw.substringBefore('/') // "DOE/JOHN" -> "JOHN DOE"
@@ -189,6 +196,21 @@ object Importer {
         if (words.isEmpty() || words.any { it.lowercase() in setOf("the", "and", "your", "this", "information", "details") }) return null
         // "JOHN DOE" -> "John Doe"
         return words.joinToString(" ") { w -> if (w.length > 1 && w == w.uppercase()) w.lowercase().replaceFirstChar { it.uppercase() } else w }
+    }
+
+    /** Mail headers, forward markers, greetings and sign-offs: lines that name people who may not be flying. */
+    private val notItinerary = Regex(
+        "(?i)^\\s*(?:(?:from|to|cc|bcc|sent|date|subject|reply-to)\\s*:|.*@|.*forwarded message|" +
+            "(?:hi|hello|hey|dear|thanks|thank you|best|cheers|regards|sincerely|love)\\b)",
+    )
+
+    /** The one [known] full name (first and last word, any order or case, "DOE/JANE" too) on an itinerary line. */
+    private fun knownIn(t: String, known: List<String>): String? {
+        val lines = t.lines().filterNot { notItinerary.containsMatchIn(it) }.map { " " + it.lowercase().replace(Regex("[^a-z']+"), " ") + " " }
+        return known.filter { n ->
+            val w = n.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
+            w.size >= 2 && lines.any { " ${w.first()} " in it && " ${w.last()} " in it }
+        }.distinct().singleOrNull()
     }
 
     /**
@@ -234,15 +256,19 @@ object Importer {
             val lastDate = allDates.lastOrNull { it.first in prevEnd until start }
             // A date right after the number ("UA1234 Class: Economy / Fri, Oct 02", "WN500 09JUL") is this flight's;
             // otherwise it's the nearest date before the number.
-            val date = allDates.firstOrNull { it.first in m.range.last + 1 until minOf(next, start + 45) }?.second
+            // Not when a route comes first ("DL 1111 / SEA>BOS / Sat 20Mar2027 DL 2222"): that date is the next flight's.
+            val date = allDates.firstOrNull { it.first in m.range.last + 1 until minOf(next, start + 45) && airports(t.substring(m.range.last + 1, it.first)).isEmpty() }?.second
                 ?: allDates.lastOrNull { it.first < start }?.second ?: allDates.firstOrNull { it.first in start until next }?.second
             // Details sit either after the flight number (Delta: number, then cities and times) or before it
             // (United: date, times and airports, then the number). "After" stops at the next date, which starts the
             // next flight's block; "before" starts at this flight's date. Use whichever side is more complete.
             val afterEnd = allDates.firstOrNull { it.first in m.range.last + 1 until next && it.second != date }?.first ?: next
             val after = t.substring(start, afterEnd)
-            val before = t.substring(minOf(start, maxOf(claimed, prevEnd, lastDate?.first ?: (start - 160), start - 600)), start)
-            val seg = if (completeness(before) > completeness(after)) before else after
+            // The line above the date counts too: Delta receipts put the route there ("BOS>SEA / Wed 10Mar2027 DL 1111").
+            val dateFrom = lastDate?.first?.let { p -> t.lastIndexOf('\n', t.lastIndexOf('\n', p - 1) - 1) + 1 }
+            val before = t.substring(minOf(start, maxOf(claimed, prevEnd, dateFrom ?: (start - 160), start - 600)), start)
+            // A tie goes to "before" when another date comes before the next number: what follows is the next block.
+            val seg = if (completeness(before) > completeness(after) || completeness(before) > 0 && completeness(before) == completeness(after) && afterEnd < next) before else after
             claimed = if (seg === after && completeness(after) > 0) afterEnd else start
             val codes = codesIn(seg).takeIf { it.size == 2 } ?: airports(t.substring(maxOf(prevEnd, start - 160), afterEnd))
             val tm = times(seg)

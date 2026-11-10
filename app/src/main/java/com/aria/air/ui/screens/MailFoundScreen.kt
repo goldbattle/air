@@ -40,7 +40,7 @@ fun reviewMail(keys: List<String>) {
     val h = queue.firstOrNull() ?: return
     Imports.clear()
     Imports.found = h.flights
-    Imports.traveler = Importer.traveler(h.text)
+    Imports.traveler = Importer.traveler(h.text, Store.friends + Prefs.name)
     Imports.to = h.to
     Imports.work = Importer.isWork(h.text, h.to, Prefs::workFor)
     Imports.then = { added -> if (added) { Mail.mark(listOf(h.key), "i"); reviewMail(queue.drop(1).map { it.key }) } }
@@ -232,7 +232,7 @@ private fun FoundRow(f: Found, saved: Boolean) = Row(
             }
         }
         Text(
-            if (f.from != null && f.to != null) "${f.from} → ${f.to}" else "Route looked up on import",
+            if (f.from != null && f.to != null) "${f.from} → ${f.to}" else "Route looked up when you review it",
             fontSize = if (f.from != null && f.to != null) 20.sp else 14.sp, fontWeight = FontWeight.Bold,
         )
     }

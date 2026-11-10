@@ -50,25 +50,38 @@ internal fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
     var copies by remember(found) { mutableStateOf(emptySet<Int>()) } // already saved, but import separately anyway
     var adding by remember { mutableStateOf(false) }
     var edit by remember { mutableStateOf<EditRequest?>(null) }
+    var looking by remember(found) { mutableStateOf(found.indices.filter { found[it].from == null || found[it].to == null }.toSet()) }
     val mine = who == ""
     val undated = picked.filter { items[it].date == null }
+    val unrouted = picked.filter { (items[it].from == null || items[it].to == null) && it !in looking }
+    // Missing routes are looked up here, before you approve, so the route you see is the one that gets saved.
+    LaunchedEffect(found) {
+        for (i in looking) {
+            val r = runCatching { AdsbLol.route(found[i].airline, found[i].number) }.getOrDefault(emptyList())
+            val f = items[i]
+            if (r.size >= 2 && (f.from == null || f.to == null)) {
+                items = items.toMutableList().also { it[i] = f.copy(from = f.from ?: r.first(), to = f.to ?: r.last().takeIf { t -> t != (f.from ?: r.first()) }) }
+            }
+            looking = looking - i
+        }
+    }
 
     fun cancel() { val then = Imports.then; Imports.clear(); Nav.pop(); then?.invoke(false) }
     fun change(i: Int, field: String, f: (Found) -> Found) { items = items.toMutableList().also { it[i] = f(it[i]) }; edited = edited + "$i:$field" }
     fun choose(name: String) { who = if (Prefs.name.isNotBlank() && sameName(name, Prefs.name)) "" else name; whoAuto = false }
 
     fun addAll() {
-        val list = picked.sorted().map { i -> items[i] to (i in copies) }
         val owner = who.orEmpty()
+        // Decided now, from what the screen shows: the flight to save and the saved one it fills in (if any).
+        val list = picked.sorted().map { i -> items[i] to (if (i in copies) null else existingFor(items[i], owner)) }
         if (mine) Imports.to?.let { Prefs.setWorkFor(it, work) } // next email to this address starts the same way
         adding = true
         App.scope.launch {
             val ids = mutableListOf<String>()
             val skipped = mutableListOf<String>()
-            for ((f, copy) in list) {
-                val route = if (f.from == null || f.to == null) AdsbLol.route(f.airline, f.number) else emptyList()
-                val flight = f.toFlight(route, owner, work)
-                if (flight == null) skipped += f.label else ids += addFlight(ctx, flight, asCopy = copy)
+            for ((f, into) in list) {
+                val flight = f.toFlight(emptyList(), owner, work)
+                if (flight == null) skipped += f.label else ids += addFlight(ctx, flight, into)
             }
             val then = Imports.then
             Imports.clear()
@@ -201,7 +214,10 @@ internal fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
                             pickDate(ctx, f.date ?: LocalDate.now()) { d -> change(i, "date") { it.copy(date = d) } }
                         }
                         Hairline()
-                        ReviewCell("Route", if (f.from != null && f.to != null) "${f.from} → ${f.to}" else null, auto("route"), "Looked up when added") {
+                        ReviewCell(
+                            "Route", if (f.from != null && f.to != null) "${f.from} → ${f.to}" else null, auto("route"),
+                            if (i in looking) "Looking up…" else "Add", required = i !in looking,
+                        ) {
                             edit = EditRequest("Route, like PIT SFO", listOfNotNull(f.from, f.to).joinToString(" "), caps = true) { v ->
                                 val c = Regex("[A-Za-z]{3}").findAll(v).map { it.value.uppercase() }.filter { Db.airport(it) != null }.toList()
                                 if (c.size == 2 && c[0] != c[1]) change(i, "route") { it.copy(from = c[0], to = c[1]) }
@@ -221,7 +237,7 @@ internal fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
                         ReviewCell("Confirmation", f.booking.ifEmpty { null }, auto("booking")) {
                             edit = EditRequest("Confirmation code", f.booking, caps = true) { v -> change(i, "booking") { it.copy(booking = v.uppercase()) } }
                         }
-                        existingFor(f)?.let { old ->
+                        existingFor(f, who)?.let { old ->
                             val copy = i in copies
                             Hairline()
                             Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
@@ -251,11 +267,12 @@ internal fun ImportReview(s: Screen.Add, openPicker: () -> Unit) {
             val owner = who.orEmpty()
             Button(
                 if (adding) "Adding…" else "Add $n flight${if (n == 1) "" else "s"}" + if (owner.isNotEmpty()) " for ${owner.substringBefore(' ')}" else "",
-                Modifier.fillMaxWidth(), enabled = n > 0 && !adding && who != null && undated.isEmpty(),
+                Modifier.fillMaxWidth(), enabled = n > 0 && !adding && who != null && undated.isEmpty() && unrouted.isEmpty() && picked.none { it in looking },
             ) { addAll() }
             when {
                 who == null -> Footnote("Choose who's flying.", C.red)
                 undated.isNotEmpty() -> Footnote("Add a date for ${undated.joinToString { items[it].label }}.", C.red)
+                unrouted.isNotEmpty() -> Footnote("Add the route for ${unrouted.joinToString { items[it].label }}.", C.red)
             }
         }
     }

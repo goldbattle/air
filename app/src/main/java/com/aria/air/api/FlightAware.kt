@@ -40,7 +40,7 @@ object FlightAware {
         } ?: return@withContext null
         fun s(k: String) = leg.optString(k).takeIf { it != "null" }.orEmpty()
         f.copy(
-            from = iata(leg, "origin").ifEmpty { f.from }, to = iata(leg, "destination").ifEmpty { f.to },
+            from = f.from.ifEmpty { iata(leg, "origin") }, to = f.to.ifEmpty { iata(leg, "destination") },
             depSched = t(leg, "scheduled_out", "scheduled_off") ?: f.depSched,
             depEst = t(leg, "estimated_out", "estimated_off"), depActual = t(leg, "actual_out", "actual_off"),
             arrSched = t(leg, "scheduled_in", "scheduled_on") ?: f.arrSched,
