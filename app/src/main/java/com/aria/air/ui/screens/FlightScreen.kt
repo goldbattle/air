@@ -112,6 +112,14 @@ fun FlightScreen(id: String) {
                         LegBar(f, legs)
                         Spacer(Modifier.height(12.dp))
                     }
+                    if (f.mismatch.isNotEmpty()) {
+                        Text(
+                            "Flight status has ${f.label} on ${dayLabel(f.date)} as ${f.mismatch}, not ${f.from} → ${f.to}. " +
+                                "Check the flight number and date.",
+                            fontSize = 14.sp, color = C.orange,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
                     PhaseBar(f, current = phase, shown = shown) { shown = it }
                     Spacer(Modifier.height(12.dp))
                     Group(Modifier.animateContentSize()) {

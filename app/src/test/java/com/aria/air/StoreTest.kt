@@ -117,6 +117,17 @@ class StoreTest : AirTest() {
     }
 
     @Test
+    fun existingForIsPerTraveler() {
+        val a = flight(hours(2))
+        Store.addAll(listOf(a.copy(friend = "Sam")))
+        val found = com.aria.air.data.Found(a.airline, a.number, a.date)
+        // The review asks with the traveler you picked, and "Add" fills that same flight: Sam's, not yours.
+        assertEquals("Sam", com.aria.air.importer.existingFor(found)!!.friend)
+        assertEquals("Sam", com.aria.air.importer.existingFor(found, "sam")!!.friend)
+        assertNull(com.aria.air.importer.existingFor(found, ""))
+    }
+
+    @Test
     fun upsertAndRemove() {
         val a = flight(hours(2))
         Store.upsert(a)

@@ -31,7 +31,7 @@ fun Flight.toJson(): JSONObject = JSONObject()
     .putStr("aircraft", aircraft).putStr("reg", reg)
     .put("cancelled", cancelled).put("diverted", diverted)
     .putStr("seat", seat).putStr("booking", booking).putStr("notes", notes)
-    .putStr("friend", friend).put("source", source).put("work", work).putInst("updated", updated).putInst("faAt", faAt).putStr("adbSaid", adbSaid).putStr("alerted", alerted)
+    .putStr("friend", friend).put("source", source).put("work", work).putInst("updated", updated).putInst("faAt", faAt).putStr("adbSaid", adbSaid).putStr("mismatch", mismatch).putStr("alerted", alerted)
     .apply {
         fun wx(w: Wx) = JSONObject().put("t", w.tempC).put("code", w.code).put("wind", w.windKmh)
             .put("at", w.at.toEpochMilli()).put("fetched", w.fetched.toEpochMilli())
@@ -66,7 +66,7 @@ fun flightFrom(j: JSONObject) = Flight(
     aircraft = j.optString("aircraft"), reg = j.optString("reg"),
     cancelled = j.optBoolean("cancelled"), diverted = j.optBoolean("diverted"),
     seat = j.optString("seat"), booking = j.optString("booking"), notes = j.optString("notes"),
-    friend = j.optString("friend"), source = j.optString("source", "manual"), work = j.optBoolean("work"), updated = j.inst("updated"), faAt = j.inst("faAt"), adbSaid = j.optString("adbSaid"),
+    friend = j.optString("friend"), source = j.optString("source", "manual"), work = j.optBoolean("work"), updated = j.inst("updated"), faAt = j.inst("faAt"), adbSaid = j.optString("adbSaid"), mismatch = j.optString("mismatch"),
     alerted = j.optString("alerted"),
     depWx = j.optJSONObject("depWx")?.let(::wxFrom), arrWx = j.optJSONObject("arrWx")?.let(::wxFrom),
     routeWx = j.optJSONObject("routeWx")?.let { runCatching { routeWxFrom(it) }.getOrNull() },

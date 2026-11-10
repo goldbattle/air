@@ -43,29 +43,26 @@ fun defaultTraveler(me: String, friends: List<String>, booking: String?, friendT
     else -> friends.firstOrNull { sameName(it, booking) } ?: booking
 }
 
-/** A saved flight this imported one probably is: same number and date, or same route and date. */
-fun existingFor(f: Found): Flight? {
+/**
+ * A saved flight this imported one probably is: same number and date, or same route and date. Only [friend]'s ("" =
+ * mine) when given. The review shows this and "Add" fills exactly this one, so what you saw is what happens.
+ */
+fun existingFor(f: Found, friend: String? = null): Flight? {
     val d = f.date ?: return null
-    return Store.flights.firstOrNull { it.date == d && it.airline == f.airline && it.number == f.number }
-        ?: Store.flights.firstOrNull { it.date == d && f.from != null && it.from == f.from && it.to == f.to }
+    val day = Store.flights.filter { it.date == d && (friend == null || it.friend.equals(friend, true)) }
+    return day.firstOrNull { it.airline == f.airline && it.number == f.number }
+        ?: day.firstOrNull { f.from != null && it.from == f.from && it.to == f.to }
 }
 
 /**
- * Saves a flight, fills in what the APIs know, and starts tracking. Returns its id. If it's already saved, the saved
- * one gets this one's missing details instead, unless [asCopy], which saves it separately (it then shows up in
- * Settings › Duplicates).
+ * Saves a flight, fills in what the APIs know, and starts tracking. Returns its id. With [into] (a saved copy of the
+ * same flight, say from a byAir import), that one gets this one's missing details instead; pass null to save it
+ * separately (it then shows up in Settings › Duplicates).
  */
-suspend fun addFlight(ctx: Context, f: Flight, asCopy: Boolean = false): String {
-    if (asCopy) {
-        Store.upsert(f)
-        runCatching { FlightSync.refresh(f) }.getOrNull()?.let { n -> if (Store.get(f.id) != null) Store.upsert(n) }
-        Tracker.schedule(ctx)
-        return f.id
-    }
-    // Already there (say from a byAir import): fill in what this document adds instead of duplicating it.
-    Store.findSame(f)?.let { old ->
-        Store.upsert(old.fillFrom(f))
-        return old.id
+suspend fun addFlight(ctx: Context, f: Flight, into: Flight? = Store.findSame(f)): String {
+    if (into != null) {
+        Store.upsert(into.fillFrom(f))
+        return into.id
     }
     Store.upsert(f)
     // One lookup per added flight, past ones included, to backfill actual times, gates and aircraft.

@@ -22,6 +22,33 @@ object AeroDataBox {
     /** RapidAPI's auth headers for AeroDataBox. */
     internal fun headers(key: String) = mapOf("X-RapidAPI-Key" to key, "X-RapidAPI-Host" to "aerodatabox.p.rapidapi.com")
 
+    private fun iata(side: JSONObject?) = side?.optJSONObject("airport")?.optString("iata").orEmpty()
+
+    /**
+     * The leg that is [f]: departing on its date (another day's run of the same number says nothing about this one)
+     * from its airport. A number flown elsewhere that day (DL 1111 LAX-DEN, when yours is BOS-SEA) isn't yours: null,
+     * rather than taking over your route. Pure, for tests.
+     */
+    internal fun pickLeg(legs: org.json.JSONArray, f: Flight): JSONObject? {
+        fun localDate(side: JSONObject?) = side?.optJSONObject("scheduledTime")?.optString("local")?.take(10)
+        return (0 until legs.length()).map { legs.getJSONObject(it) }
+            .filter { localDate(it.optJSONObject("departure")) == f.date.toString() }
+            .firstOrNull { f.from.isEmpty() || iata(it.optJSONObject("departure")) == f.from }
+    }
+
+    /**
+     * When [f]'s number flies that day but not from its airport: the routes it does fly ("LAX → DEN"), else null.
+     * Kept on the flight and shown on its page, so a wrong number or date in an import gets noticed. Pure, for tests.
+     */
+    internal fun mismatch(legs: org.json.JSONArray, f: Flight): String? {
+        fun localDate(side: JSONObject?) = side?.optJSONObject("scheduledTime")?.optString("local")?.take(10)
+        return (0 until legs.length()).map { legs.getJSONObject(it) }
+            .filter { localDate(it.optJSONObject("departure")) == f.date.toString() }
+            .map { "${iata(it.optJSONObject("departure"))} → ${iata(it.optJSONObject("arrival"))}" }
+            .distinct().joinToString(", ").ifEmpty { null }
+            ?.also { Debug.note("${f.label} ${f.date}: flies $it, not ${f.from} → ${f.to}") }
+    }
+
     /** Status from AeroDataBox (RapidAPI). Covers roughly a year back and a year ahead. */
     suspend fun status(f: Flight, key: String): Flight? = withContext(Dispatchers.IO) {
         val body = Http.get(
@@ -31,13 +58,8 @@ object AeroDataBox {
         )
         Debug.status(f, body)
         if (body.isBlank()) return@withContext null // 204: no such flight that day
-        val legs = org.json.JSONArray(body).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
-        fun iata(side: JSONObject?) = side?.optJSONObject("airport")?.optString("iata").orEmpty()
-        // Only this flight's day: another day's run of the same number says nothing about this one.
-        fun localDate(side: JSONObject?) = side?.optJSONObject("scheduledTime")?.optString("local")?.take(10)
-        val leg = legs.filter { localDate(it.optJSONObject("departure")) == f.date.toString() }
-            .let { day -> day.firstOrNull { iata(it.optJSONObject("departure")) == f.from } ?: day.firstOrNull() }
-            ?: return@withContext null
+        val legs = org.json.JSONArray(body)
+        val leg = pickLeg(legs, f) ?: return@withContext mismatch(legs, f)?.let { f.copy(mismatch = it) }
         val dep = leg.optJSONObject("departure") ?: JSONObject()
         val arr = leg.optJSONObject("arrival") ?: JSONObject()
         fun t(side: JSONObject, k: String) = side.optJSONObject(k)?.optString("utc")?.takeIf { it.isNotEmpty() }
@@ -66,7 +88,8 @@ object AeroDataBox {
             (s(dep, "gate").let { it.isNotEmpty() && it != f.depGate } || s(arr, "gate").let { it.isNotEmpty() && it != f.arrGate })
         if (disputed) Debug.note("${f.label}: AeroDataBox now says gates $said (was ${f.adbSaid}), asking FlightAware")
         f.copy(
-            from = iata(dep).ifEmpty { f.from }, to = iata(arr).ifEmpty { f.to },
+            // The route is what you saved; a lookup only fills it in when it's missing.
+            from = f.from.ifEmpty { iata(dep) }, to = f.to.ifEmpty { iata(arr) },
             depSched = t(dep, "scheduledTime") ?: f.depSched,
             // Stale data still counts when it shows a delay; it just can't vouch for "on time".
             depEst = t(dep, "revisedTime")?.takeIf { e -> !stale || t(dep, "scheduledTime")?.let { e > it } == true },
@@ -80,6 +103,9 @@ object AeroDataBox {
             reg = keep(f.reg, aircraft?.optString("reg").orEmpty()),
             hex = aircraft?.optString("modeS")?.lowercase()?.takeIf { it.length == 6 } ?: f.hex,
             cancelled = status.startsWith("Cancel"), diverted = status == "Diverted",
+            // Ours leaves from the right airport but lands somewhere else: still ours, but say so.
+            mismatch = iata(arr).takeIf { f.to.isNotEmpty() && it.isNotEmpty() && it != f.to && status != "Diverted" }
+                ?.let { "${f.from} → $it" }.orEmpty(),
             adbSaid = said, disputed = disputed,
         )
     }

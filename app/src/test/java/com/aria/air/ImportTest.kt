@@ -157,6 +157,38 @@ class ImportTest : AirTest() {
     }
 
     @Test
+    fun deltaReceiptRouteAboveDateAndNumber() {
+        // Each flight: "BOS>SEA", then "Wed 10Mar2027 DL 1111". The next flight's route and date sit just after the
+        // number and must not be taken for this one's.
+        val pdf = """
+            Date of Purchase: Jan 04, 2027
+            Flight Receipt for Boston, MA to Seattle, WA
+            PASSENGER INFORMATION
+            JANE A DOE
+            Confirmation Number: QWERTY
+            Ticket Number: 0060000000000
+            FLIGHT INFORMATION
+            Date and Flight Status Class Seat/Cabin
+            BOS>SEA
+            Wed 10Mar2027 DL 1111
+            OPEN V CMAIN
+            SEA>BOS
+            Sat 20Mar2027 DL 2222
+            OPEN X CMAIN
+            DETAILED CHARGES
+            Air Transportation Charges
+            Base Fare: ${'$'}100.00 USD
+        """.trimIndent()
+        val f = parse(pdf)
+        assertEquals(listOf("DL 1111", "DL 2222"), f.map { it.label })
+        assertEquals(Found("DL", "1111", d(2027, 3, 10), "BOS", "SEA", null, null, "", "QWERTY"), f[0])
+        assertEquals(Found("DL", "2222", d(2027, 3, 20), "SEA", "BOS", null, null, "", "QWERTY"), f[1])
+        assertEquals("Jane A Doe", Importer.traveler(pdf)) // "PASSENGER INFORMATION", name on the next line
+        // The same receipt as another PDF reader spells it, with the hidden "to" a letter a line.
+        assertEquals(f, parse(pdf.replace("BOS>SEA", "BOS>\nt\no\nSEA").replace("SEA>BOS", "SEA>\nt\no\nBOS")))
+    }
+
+    @Test
     fun corporateItineraryYearlessDatesAndWork() {
         val pdf = """
             <travel@example.com> Thu, Nov 20, 2025 at 6:38 PM
@@ -270,6 +302,30 @@ class ImportTest : AirTest() {
         assertEquals("John McDoe", Importer.traveler("Passengers\nJohn McDoe"))
         assertNull(Importer.traveler("Thanks for flying with us"))
         assertNull(Importer.traveler("Traveler: the details below"))
+    }
+
+    @Test
+    fun travelerFromKnownPeople() {
+        val known = listOf("Sam Lee", "Jordan Park", "Alex Kim")
+        // No label, but a friend is named in the itinerary: them, in any case or LAST/FIRST.
+        assertEquals("Jordan Park", Importer.traveler("Confirmation ABC123\nJORDAN T PARK  Seat 12A\nDL 1111 BOS>SEA", known))
+        assertEquals("Sam Lee", Importer.traveler("LEE/SAM\nUA 100", known))
+        // A forward: headers, the greeting and sign-off name other people; only the itinerary counts.
+        val fwd = """
+            From: Alex Kim <alex@example.com>
+            To: Jordan Park <jordan@example.com>
+            Subject: Fwd: my flights
+            Hi Jordan Park, here's the trip.
+            ---------- Forwarded message ---------
+            Booking ABC123 for SAM LEE
+            DL 1111 BOS>SEA
+            Thanks, Alex Kim
+        """.trimIndent()
+        assertEquals("Sam Lee", Importer.traveler(fwd, known))
+        // Nobody known in the itinerary, or two of them: no guess.
+        assertNull(Importer.traveler(fwd.replace("SAM LEE", "someone"), known))
+        assertNull(Importer.traveler("SAM LEE and JORDAN PARK\nDL 1", known))
+        assertNull(Importer.traveler("Sam went to the park", known)) // first and last name both needed
     }
 
     @Test
