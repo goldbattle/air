@@ -76,7 +76,8 @@ object Importer {
 
     // ---------- Parsing ----------
 
-    private val flightRe = Regex("(?<![A-Z0-9:/-])([A-Z][A-Z0-9]|[0-9][A-Z])\\s?(\\d{1,4})(?![0-9:])")
+    // Not aircraft types, which read like Aegean (A3) flights: "Airbus A321", "A330-900", "A321neo".
+    private val flightRe = Regex("(?<![A-Z0-9:/-])(?<!Airbus\\s)([A-Z][A-Z0-9]|[0-9][A-Z])\\s?(\\d{1,4})(?![0-9:]|-\\d|[a-z])")
     private val codeRe = Regex("(?<![A-Za-z])([A-Z]{3})(?![A-Za-z])")
     private val timeRe = Regex("(?<![\\d:])(\\d{1,2}):(\\d{2})\\s*([AaPp])?\\.?\\s?[Mm]?\\.?(?![\\d])")
     // Keywords in any case, the code itself uppercase ("Trip Confirmation Booked..." must not give "Booked").
@@ -243,11 +244,14 @@ object Importer {
         val out = LinkedHashMap<String, Found>()
         val routed = HashSet<String>() // flights whose airports sit next to their own number, not borrowed nearby
         var claimed = 0 // text up to here belongs to an earlier flight (its details came after its number)
-        fun airports(s: String) = codeRe.findAll(s).map { it.groupValues[1] }
-            .filter { it !in notAirports && Db.airport(it) != null }.distinct().take(2).toList()
+        // [last]: the two nearest the end, for text before a number (a trip summary above it lists other routes).
+        fun airports(s: String, last: Boolean = false) = codeRe.findAll(s).map { it.groupValues[1] }
+            .filter { it !in notAirports && Db.airport(it) != null }.toList()
+            .let { if (last) it.asReversed().distinct().take(2).reversed() else it.distinct().take(2) }
         fun cities(s: String) = cityRe.findAll(s).mapNotNull { Db.airportForCity(it.groupValues[1], it.groupValues[2])?.iata }
             .distinct().take(2).toList()
-        fun codesIn(s: String) = airports(s).takeIf { it.size == 2 } ?: cities(s).takeIf { it.size == 2 } ?: airports(s)
+        fun codesIn(s: String, last: Boolean = false) =
+            airports(s, last).takeIf { it.size == 2 } ?: cities(s).takeIf { it.size == 2 } ?: airports(s, last)
         fun completeness(s: String) = (if (codesIn(s).size == 2) 1 else 0) + (if (times(s).size >= 2) 1 else 0)
         flights.forEachIndexed { i, m ->
             val start = m.range.first
@@ -267,10 +271,10 @@ object Importer {
             // The line above the date counts too: Delta receipts put the route there ("BOS>SEA / Wed 10Mar2027 DL 1111").
             val dateFrom = lastDate?.first?.let { p -> t.lastIndexOf('\n', t.lastIndexOf('\n', p - 1) - 1) + 1 }
             val before = t.substring(minOf(start, maxOf(claimed, prevEnd, dateFrom ?: (start - 160), start - 600)), start)
-            // A tie goes to "before" when another date comes before the next number: what follows is the next block.
-            val seg = if (completeness(before) > completeness(after) || completeness(before) > 0 && completeness(before) == completeness(after) && afterEnd < next) before else after
+            // A tie goes to "before": with details both sides, what follows is the next flight's block.
+            val seg = if (completeness(before) > completeness(after) || completeness(before) > 0 && completeness(before) == completeness(after)) before else after
             claimed = if (seg === after && completeness(after) > 0) afterEnd else start
-            val codes = codesIn(seg).takeIf { it.size == 2 } ?: airports(t.substring(maxOf(prevEnd, start - 160), afterEnd))
+            val codes = codesIn(seg, last = seg === before).takeIf { it.size == 2 } ?: airports(t.substring(maxOf(prevEnd, start - 160), afterEnd))
             val tm = times(seg)
             val from = codes.getOrNull(0); val to = codes.getOrNull(1)
             // Seats are often listed per leg elsewhere: "SFO to PWM: 22C", "SFO-PIT 21C".
@@ -288,6 +292,20 @@ object Importer {
             if (prev == null || score(f) > score(prev)) out[key] = f
             if (codesIn(seg).size == 2) routed += key
         }
+        // A route followed straight by a date ("BOS MAD Mon, Apr 05, 2027 - Tue, Apr 06, 2027", in a trip summary)
+        // dates that flight, over the date near its number, which can be its arrival ("Flight 1: (arrive Tue, ...").
+        val routeToDate = Regex("\\s*(?:(?i:mon|tue|wed|thu|fri|sat|sun)[a-z]*\\.?,?\\s*)?")
+        val redated = LinkedHashMap<String, Found>()
+        for ((k, f) in out) {
+            val ends = if (f.from == null || f.to == null) emptyList()
+                else Regex("\\b${f.from}\\W+${f.to}\\b").findAll(t).map { it.range.last + 1 }.toList()
+            val d = allDates.filter { (p, _) -> ends.any { it <= p && routeToDate.matches(t.substring(it, p)) } }.map { it.second }.distinct()
+            val g = if (d.size == 1) f.copy(date = d[0]) else f
+            val key = "${g.label}|${g.date}"
+            redated.putIfAbsent(key, g)
+            if (k in routed) routed += key
+        }
+        out.clear(); out.putAll(redated)
         // When some flights come with both airports, a bare number next to nothing ("CI 9" in a footer) isn't one,
         // unless it's on the same airline as a complete flight (a connection whose airports didn't parse).
         val complete = out.filterKeys { it in routed }

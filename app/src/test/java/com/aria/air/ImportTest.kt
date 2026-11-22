@@ -411,4 +411,46 @@ class ImportTest : AirTest() {
         assertEquals(listOf("a", "b, c", "say \"hi\"", ""), csvLine("a,\"b, c\",\"say \"\"hi\"\"\","))
         assertEquals(listOf(""), csvLine(""))
     }
+
+    @Test
+    fun agencyItineraryWithAircraftAndArrivalDates() {
+        // Travel agency layout: the flight's only nearby date is its arrival, the departure dates sit in a route
+        // summary further down, and aircraft types ("Airbus A330-900neo") read like Aegean's A3 flight numbers.
+        val pdf = """
+            Flight
+            Mon, Apr 05, 2027 - Thu, Apr 15, 2027
+            Boston (BOS) Madrid (MAD)
+            Madrid (MAD) Chicago (ORD)
+            Flight 1: (arrive Tue, Apr 06, 2027)
+            05:20 pm
+            BOS
+            06:30 am
+            MAD
+            Next day arrival
+            IB 6250 Airbus A330-900neo
+            operated by IBERIA
+            Flight 2:
+            12:40 pm
+            MAD
+            03:10 pm
+            ORD
+            IB 6253 Airbus A321neo
+            operated by IBERIA
+            Rules, policies, and cancellations
+            BOS
+            MAD
+            Mon, Apr 05, 2027 - Tue, Apr 06, 2027
+            MAD
+            ORD
+            Thu, Apr 15, 2027 - Thu, Apr 15, 2027
+        """.trimIndent()
+        val f = parse(pdf)
+        assertEquals(listOf("IB 6250", "IB 6253"), f.map { it.label })
+        assertEquals(Found("IB", "6250", d(2027, 4, 5), "BOS", "MAD", t(17, 20), t(6, 30)), f[0])
+        assertEquals(Found("IB", "6253", d(2027, 4, 15), "MAD", "ORD", t(12, 40), t(15, 10)), f[1])
+        // Android's PDF reader puts each trip summary route on one line, right above the first flight's arrival
+        // date; the airports nearest the number are the flight's. Other readers split the lines and use CRLF.
+        assertEquals(f, parse(pdf.replace(") Madrid", ")\nMadrid").replace(") Chicago", ")\nChicago")))
+        assertEquals(f, parse(pdf.replace("\n", "\r\n")))
+    }
 }
